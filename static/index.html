@@ -197,7 +197,7 @@ function PHDTable({compact}) {
 }
 
 // ─── BUILDER FORM ───
-function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,taxRate,setTaxRate}) {
+function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,taxRate,setTaxRate,onSearch}) {
   const fileRef = useRef();
   const [presets,setPresetsState] = useState(loadPresets());
   const [presetName,setPresetName] = useState("");
@@ -244,6 +244,10 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
       <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>ReDry Proposal Builder</div>
       <h1 style={{fontSize:28,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>Create New Proposal</h1>
       <p style={{color:C.gray,fontSize:14,marginTop:6}}>Fill in the project details to generate a branded PDF and shareable client link.</p>
+      {onSearch && <button onClick={onSearch} style={{marginTop:10,background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,transition:"all 0.15s"}}
+        onMouseEnter={e=>{e.currentTarget.style.borderColor=C.orange;e.currentTarget.style.color=C.orange}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.navy}}>
+        &#128269; Past Proposals
+      </button>}
     </div>
 
     {/* Presets Bar */}
@@ -720,6 +724,77 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
 }
 
 // ─── MAIN ───
+function ProposalSearch({onLoad, onBack}) {
+  const [proposals, setProposals] = React.useState([]);
+  const [search, setSearch] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(()=>{
+    fetch(`${API}/api/proposals`).then(r=>r.json()).then(d=>{setProposals(d);setLoading(false);}).catch(()=>setLoading(false));
+  },[]);
+
+  const statusColor = s => ({draft:"#94a3b8",sent:"#3b82f6",viewed:"#8b5cf6",signed:"#16a34a",paid:"#16a34a"}[s]||"#94a3b8");
+  const statusLabel = s => ({draft:"Draft",sent:"Sent",viewed:"Viewed",signed:"Signed",paid:"Paid"}[s]||"Draft");
+  const fmtDate = d => d ? new Date(d).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "";
+
+  const q = search.toLowerCase();
+  const filtered = proposals.filter(p =>
+    (p.projectName||"").toLowerCase().includes(q) ||
+    (p.clientCompany||"").toLowerCase().includes(q) ||
+    (p.clientContact||"").toLowerCase().includes(q) ||
+    (p.clientEmail||"").toLowerCase().includes(q) ||
+    (p.id||"").toLowerCase().includes(q)
+  );
+
+  return (<div style={{maxWidth:820,margin:"0 auto"}}>
+    <div style={{textAlign:"center",marginBottom:24}}>
+      <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>ReDry Proposal Builder</div>
+      <h1 style={{fontSize:28,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>Past Proposals</h1>
+      <p style={{color:C.gray,fontSize:14,marginTop:6}}>Search and load a previous proposal to edit or resend.</p>
+    </div>
+
+    <div style={{display:"flex",gap:10,marginBottom:20,alignItems:"center"}}>
+      <button onClick={onBack} style={{background:C.navy,color:"#fff",border:"none",borderRadius:6,padding:"10px 18px",cursor:"pointer",fontWeight:700,fontSize:13,whiteSpace:"nowrap"}}>
+        &larr; New Proposal
+      </button>
+      <input type="text" placeholder="Search by project, company, contact, or ID..." value={search} onChange={e=>setSearch(e.target.value)}
+        style={{flex:1,padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,outline:"none"}} />
+    </div>
+
+    {loading && <div style={{textAlign:"center",color:C.gray,padding:40}}>Loading proposals...</div>}
+
+    {!loading && filtered.length === 0 && <div style={{textAlign:"center",color:C.gray,padding:40}}>
+      {search ? "No proposals match your search." : "No proposals found."}
+    </div>}
+
+    {!loading && filtered.map(p => (
+      <div key={p.id} onClick={()=>onLoad(p.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",
+        background:"#fff",border:`1px solid ${C.border}`,borderRadius:8,marginBottom:8,cursor:"pointer",
+        transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.borderColor=C.orange} onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {p.projectName || "Untitled"}
+          </div>
+          <div style={{fontSize:12,color:C.gray,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {p.clientCompany}{p.clientContact ? ` \u2022 ${p.clientContact}` : ""}
+          </div>
+        </div>
+        <div style={{textAlign:"right",flexShrink:0}}>
+          <div style={{fontSize:11,fontWeight:700,color:statusColor(p.status),textTransform:"uppercase",letterSpacing:0.5,marginBottom:2}}>
+            {statusLabel(p.status)}
+          </div>
+          <div style={{fontSize:11,color:C.gray}}>{fmtDate(p.createdAt)}</div>
+        </div>
+        <div style={{color:C.gray,fontSize:16,flexShrink:0}}>&rsaquo;</div>
+      </div>
+    ))}
+
+    {!loading && filtered.length > 0 && <div style={{textAlign:"center",color:C.gray,fontSize:12,marginTop:12}}>
+      {filtered.length} proposal{filtered.length !== 1 ? "s" : ""}
+    </div>}
+  </div>);
+}
+
 function App() {
   const [view,setView] = useState("loading");
   const [form,setForm] = useState(loadForm);
@@ -776,7 +851,18 @@ function App() {
 
   if(view==="loading") return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.gray}}>Loading...</div>;
   if(view==="client") return <ClientView form={form} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
-  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} onSetResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate}/></div>);
+  if(view==="search") return (<div style={{padding:"40px 20px"}}><ProposalSearch onBack={()=>setView("form")} onLoad={(pid)=>{
+    fetch(`${API}/api/proposal/${pid}`).then(r=>r.json()).then(cfg=>{
+      const ventFile = cfg._ventMapFilename;
+      delete cfg._ventMapFilename; delete cfg._createdAt;
+      setForm(f=>({...f,...cfg}));
+      setProposalId(pid);
+      if(ventFile) setVentMapUrl(`${API}/api/proposal/${pid}/ventmap`);
+      else { setVentMapUrl(null); setVentMapFile(null); }
+      setView("form");
+    }).catch(()=>alert("Failed to load proposal."));
+  }}/></div>);
+  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} onSetResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate} onSearch={()=>setView("search")}/></div>);
 }
 
 class ErrorBoundary extends React.Component {
