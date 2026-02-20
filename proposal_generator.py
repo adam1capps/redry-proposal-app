@@ -501,9 +501,9 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
             Paragraph(fmt_currency(tax_amount), style_table_cell_bold_right)])
 
     cost_rows.append([
-        Paragraph("VENT SYSTEM TOTAL", style_table_cell_bold),
+        Paragraph("VENT SYSTEM TOTAL", ParagraphStyle('TotalLabel', parent=style_table_cell_bold, textColor=WHITE)),
         Paragraph("", style_table_cell_right),
-        Paragraph(fmt_currency(vent_subtotal), style_table_cell_bold_right)])
+        Paragraph(fmt_currency(vent_subtotal), ParagraphStyle('TotalAmt', parent=style_table_cell_bold_right, textColor=WHITE))])
 
     cost_table = Table(cost_rows, colWidths=[usable_width * 0.48, usable_width * 0.27, usable_width * 0.25])
     cost_table.setStyle(TableStyle([
