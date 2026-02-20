@@ -228,6 +228,7 @@ def generate_proposal_link():
         with open(os.path.join(PROPOSALS_DIR, f"{proposal_id}.pdf"), "wb") as f: f.write(pdf_bytes)
         config["_ventMapFilename"] = vent_map_filename
         config["_createdAt"] = datetime.now(timezone.utc).isoformat()
+        config["_proposalId"] = proposal_id
         with open(os.path.join(PROPOSALS_DIR, f"{proposal_id}.json"), "w") as f: json.dump(config, f)
         db_store_proposal(proposal_id, config, "draft")
         db_log_event(proposal_id, "created")
