@@ -205,6 +205,7 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
   const s = k => v => setForm(f=>({...f,[k]:v}));
   const wetSF=parseFloat(form.wetSF)||0, rate=parseFloat(form.ratePSF)||0;
   const scanCost=parseFloat(form.scanCost)||0, numScans=parseInt(form.numScans)||0;
+  const ventTotal=wetSF*rate;
   const ok = form.clientCompany && form.projectName && form.projectAddress && wetSF>0;
 
   // Save form to localStorage on change
