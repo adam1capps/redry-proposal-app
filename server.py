@@ -16,10 +16,13 @@ CORS(app)
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PK = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
+GOOGLE_MAPS_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
 if not stripe.api_key:
     print("WARNING: STRIPE_SECRET_KEY not set. Payment features will not work.")
 if not STRIPE_PK:
     print("WARNING: STRIPE_PUBLISHABLE_KEY not set. Payment features will not work.")
+if not GOOGLE_MAPS_KEY:
+    print("WARNING: GOOGLE_MAPS_API_KEY not set. Address autocomplete will not work.")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
@@ -55,6 +58,11 @@ def get_tax_rate():
 @app.route("/api/stripe-pk")
 def get_stripe_pk():
     return jsonify({"pk": STRIPE_PK})
+
+
+@app.route("/api/google-maps-key")
+def get_google_maps_key():
+    return jsonify({"key": GOOGLE_MAPS_KEY})
 
 
 @app.route("/api/create-checkout", methods=["POST"])

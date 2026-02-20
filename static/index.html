@@ -13,6 +13,13 @@
 body { font-family: 'DM Sans', sans-serif; background: #f8f9fb; color: #1a1a2e; }
 input, button, select { font-family: 'DM Sans', sans-serif; }
 a { color: inherit; }
+.preset-btn { padding:6px 12px; border:1px solid #e2e8f0; border-radius:6px; background:#fff; font-size:12px; font-weight:600; cursor:pointer; color:#1B2A4A; transition:all 0.15s; white-space:nowrap; }
+.preset-btn:hover { border-color:#E8943A; background:#fef7ed; }
+.preset-btn.active { border-color:#E8943A; background:#E8943A; color:#fff; }
+.pac-container { z-index: 10000 !important; font-family: 'DM Sans', sans-serif !important; border-radius: 8px !important; border: 1px solid #e2e8f0 !important; box-shadow: 0 4px 16px rgba(0,0,0,0.1) !important; margin-top: 4px !important; }
+.pac-item { padding: 8px 12px !important; font-size: 13px !important; cursor: pointer !important; }
+.pac-item:hover { background: #fef7ed !important; }
+.pac-item-selected { background: #fef7ed !important; }
 </style>
 </head>
 <body>
@@ -22,6 +29,76 @@ const { useState, useRef, useEffect, useCallback } = React;
 
 const C = { orange: "#E8943A", navy: "#1B2A4A", dark: "#1a1a2e", gray: "#64748b", bg: "#f8f9fb", border: "#e2e8f0", green: "#16a34a", red: "#dc2626" };
 const API = "";
+
+// ─── Google Places Autocomplete loader ───
+let _gmapsLoaded = false, _gmapsLoading = false, _gmapsCallbacks = [];
+function loadGoogleMaps(apiKey) {
+  return new Promise((resolve) => {
+    if (_gmapsLoaded) return resolve();
+    _gmapsCallbacks.push(resolve);
+    if (_gmapsLoading) return;
+    _gmapsLoading = true;
+    window.__gmapsReady = () => { _gmapsLoaded = true; _gmapsCallbacks.forEach(cb => cb()); _gmapsCallbacks = []; };
+    const s = document.createElement("script");
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=__gmapsReady`;
+    s.async = true; s.defer = true;
+    document.head.appendChild(s);
+  });
+}
+
+function AddressAutocomplete({value, onChange, onPlaceSelect, placeholder, required}) {
+  const inputRef = useRef(null);
+  const acRef = useRef(null);
+  const [gmapsReady, setGmapsReady] = useState(_gmapsLoaded);
+
+  useEffect(() => {
+    if (_gmapsLoaded) { setGmapsReady(true); return; }
+    fetch(`${API}/api/google-maps-key`).then(r=>r.json()).then(d=>{
+      if(d.key) loadGoogleMaps(d.key).then(()=>setGmapsReady(true));
+    }).catch(()=>{});
+  }, []);
+
+  useEffect(() => {
+    if (!gmapsReady || !inputRef.current || acRef.current) return;
+    const ac = new window.google.maps.places.Autocomplete(inputRef.current, {
+      types: ["address"],
+      componentRestrictions: { country: "us" },
+      fields: ["address_components", "formatted_address"]
+    });
+    ac.addListener("place_changed", () => {
+      const place = ac.getPlace();
+      if (!place.address_components) return;
+      let street = "", city = "", state = "", zip = "";
+      for (const comp of place.address_components) {
+        const t = comp.types;
+        if (t.includes("street_number")) street = comp.long_name + " ";
+        if (t.includes("route")) street += comp.short_name;
+        if (t.includes("locality") || t.includes("sublocality_level_1")) city = comp.long_name;
+        if (t.includes("administrative_area_level_1")) state = comp.short_name;
+        if (t.includes("postal_code")) zip = comp.long_name;
+      }
+      onPlaceSelect({ address: street.trim(), city, state, zip });
+    });
+    acRef.current = ac;
+  }, [gmapsReady]);
+
+  // Keep input synced with controlled value when user types manually
+  const handleChange = (e) => { onChange(e.target.value); };
+
+  return (
+    <div style={{flex:"1 1 100%",minWidth:0}}>
+      <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4,letterSpacing:0.3}}>
+        Street Address {required && <span style={{color:C.orange}}>*</span>}
+        {gmapsReady && <span style={{fontWeight:400,color:C.gray,fontSize:11,marginLeft:6}}>&#x1F50D; powered by Google</span>}
+      </label>
+      <div style={{display:"flex",alignItems:"center",background:"#fff",border:`1px solid ${C.border}`,borderRadius:6,overflow:"hidden"}}>
+        <input ref={inputRef} type="text" value={value} onChange={handleChange} placeholder={placeholder}
+          autoComplete="off"
+          style={{flex:1,padding:"8px 12px",border:"none",outline:"none",fontSize:14,fontFamily:"'DM Sans',sans-serif",color:C.dark,background:"transparent",width:"100%"}}/>
+      </div>
+    </div>
+  );
+}
 
 const PHD = {
   level3: { dry: "0\u201335", damp: "35\u201370", sat: "70\u201399" },
@@ -46,15 +123,20 @@ const defaultForm = {
   taxRate:"", taxRateOverride:"", waiveScans: false
 };
 
-// ─── PAYMENT OPTION CALCULATOR ───
+// ─── localStorage helpers ───
+const LS_FORM = "redry_form";
+const LS_PRESETS = "redry_presets";
+const loadForm = () => { try { const s=localStorage.getItem(LS_FORM); return s ? {...defaultForm,...JSON.parse(s), proposalDate:new Date().toISOString().split("T")[0]} : defaultForm; } catch(e){ return defaultForm; }};
+const saveForm = f => { try { localStorage.setItem(LS_FORM, JSON.stringify(f)); } catch(e){} };
+const loadPresets = () => { try { const s=localStorage.getItem(LS_PRESETS); return s ? JSON.parse(s) : []; } catch(e){ return []; }};
+const savePresets = p => { try { localStorage.setItem(LS_PRESETS, JSON.stringify(p)); } catch(e){} };
+
 function calcOptions(form, taxRate) {
   const wetSF=parseFloat(form.wetSF)||0, rate=parseFloat(form.ratePSF)||0;
   const scanCost=parseFloat(form.scanCost)||0, numScans=parseInt(form.numScans)||0;
   const ventBase = wetSF * rate;
-  const scanTotal = form.waiveScans ? 0 : scanCost * numScans;
-  const scanValue = scanCost * numScans; // value even if waived
+  const scanValue = scanCost * numScans;
   const tr = taxRate || 0;
-
   const build = (label, adj, splits) => {
     const adjusted = round2(ventBase * (1 + adj));
     const tax = round2(adjusted * tr);
@@ -62,31 +144,17 @@ function calcOptions(form, taxRate) {
     const achDiscount = subtotalPreDiscount >= 10000 ? 100 : 0;
     const total = round2(subtotalPreDiscount - achDiscount);
     const totalNoAch = round2(subtotalPreDiscount);
-    const payments = splits.map(s => ({
-      ...s,
-      amount: round2(total * s.pct),
-      amountNoAch: round2(totalNoAch * s.pct),
-    }));
-    return { label, adj, adjusted, tax, achDiscount, total, totalNoAch, payments, scanTotal, scanValue, ventBase };
+    const payments = splits.map(s => ({...s, amount: round2(total * s.pct), amountNoAch: round2(totalNoAch * s.pct)}));
+    return { label, adj, adjusted, tax, achDiscount, total, totalNoAch, payments, scanValue, ventBase };
   };
-
   return [
-    build("Option 1: Pay in Full", -0.03, [
-      { pct: 1.0, label: "Full Payment", due: "Due upon contract execution" }
-    ]),
-    build("Option 2: 50/50", 0, [
-      { pct: 0.50, label: "Deposit (50%)", due: "Due upon contract execution" },
-      { pct: 0.50, label: "Balance (50%)", due: "Within 15 days of ReDry vent install invoice" }
-    ]),
-    build("Option 3: 50/40/10", 0.03, [
-      { pct: 0.50, label: "Deposit (50%)", due: "Due upon contract execution" },
-      { pct: 0.40, label: "Progress (40%)", due: "Within 15 days of ReDry vent install invoice" },
-      { pct: 0.10, label: "Final (10%)", due: "Due immediately upon removal of vents" }
-    ]),
+    build("Option 1: Pay in Full", -0.03, [{ pct:1.0, label:"Full Payment", due:"Due upon contract execution" }]),
+    build("Option 2: 50/50", 0, [{ pct:0.50, label:"Deposit (50%)", due:"Due upon contract execution" },{ pct:0.50, label:"Balance (50%)", due:"Within 15 days of ReDry vent install invoice" }]),
+    build("Option 3: 50/40/10", 0.03, [{ pct:0.50, label:"Deposit (50%)", due:"Due upon contract execution" },{ pct:0.40, label:"Progress (40%)", due:"Within 15 days of ReDry vent install invoice" },{ pct:0.10, label:"Final (10%)", due:"Due immediately upon removal of vents" }]),
   ];
 }
 
-function Inp({label,value,onChange,type="text",placeholder,prefix,suffix,half,third,required,disabled}) {
+function Inp({label,value,onChange,type="text",placeholder,prefix,suffix,half,third,required,disabled,autoComplete}) {
   const st = {flex: half?"0 0 48%":third?"0 0 31%":"1 1 100%", minWidth: third?140:half?200:0};
   return (
     <div style={st}>
@@ -95,7 +163,7 @@ function Inp({label,value,onChange,type="text",placeholder,prefix,suffix,half,th
       </label>
       <div style={{display:"flex",alignItems:"center",background:disabled?"#f1f5f9":"#fff",border:`1px solid ${C.border}`,borderRadius:6,overflow:"hidden"}}>
         {prefix && <span style={{padding:"8px 0 8px 12px",color:C.gray,fontSize:14,fontWeight:500}}>{prefix}</span>}
-        <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} disabled={disabled}
+        <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} disabled={disabled} autoComplete={autoComplete||"off"}
           style={{flex:1,padding:prefix?"8px 12px 8px 4px":"8px 12px",border:"none",outline:"none",fontSize:14,fontFamily:"'DM Sans',sans-serif",color:disabled?C.gray:C.dark,background:"transparent",width:"100%"}}/>
         {suffix && <span style={{padding:"8px 12px 8px 0",color:C.gray,fontSize:13}}>{suffix}</span>}
       </div>
@@ -130,13 +198,16 @@ function PHDTable({compact}) {
 // ─── BUILDER FORM ───
 function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,taxRate,setTaxRate}) {
   const fileRef = useRef();
+  const [presets,setPresetsState] = useState(loadPresets());
+  const [presetName,setPresetName] = useState("");
+  const [showSavePreset,setShowSavePreset] = useState(false);
   const s = k => v => setForm(f=>({...f,[k]:v}));
   const wetSF=parseFloat(form.wetSF)||0, rate=parseFloat(form.ratePSF)||0;
   const scanCost=parseFloat(form.scanCost)||0, numScans=parseInt(form.numScans)||0;
-  const ventTotal=wetSF*rate;
-  const scanTotal=form.waiveScans ? 0 : scanCost*numScans;
-  const scanValue=scanCost*numScans;
   const ok = form.clientCompany && form.projectName && form.projectAddress && wetSF>0;
+
+  // Save form to localStorage on change
+  useEffect(()=>{ saveForm(form); },[form]);
 
   // Auto-lookup tax rate when state changes
   useEffect(()=>{
@@ -150,31 +221,73 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
 
   const options = calcOptions(form, taxRate);
 
+  const doSavePreset = () => {
+    if(!presetName.trim()) return;
+    const p = [...presets, { name: presetName.trim(), data: {...form} }];
+    setPresetsState(p); savePresets(p); setPresetName(""); setShowSavePreset(false);
+  };
+  const doLoadPreset = (preset) => {
+    setForm(f=>({...f, ...preset.data, proposalDate: new Date().toISOString().split("T")[0], projectName:"", projectAddress:"", projectCity:"", projectState:"", projectZip:"", projectSection:"", wetSF:"", totalVents:"", taxRateOverride:"" }));
+  };
+  const doDeletePreset = (idx) => {
+    const p = presets.filter((_,i)=>i!==idx);
+    setPresetsState(p); savePresets(p);
+  };
+  const doClear = () => {
+    setForm({...defaultForm, proposalDate: new Date().toISOString().split("T")[0]});
+  };
+
   return (<div style={{maxWidth:820,margin:"0 auto"}}>
     <div style={{textAlign:"center",marginBottom:32}}>
       <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>ReDry Proposal Builder</div>
       <h1 style={{fontSize:28,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>Create New Proposal</h1>
       <p style={{color:C.gray,fontSize:14,marginTop:6}}>Fill in the project details to generate a branded PDF and shareable client link.</p>
     </div>
+
+    {/* Presets Bar */}
+    <div style={{marginBottom:16,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+      <span style={{fontSize:12,fontWeight:700,color:C.navy,letterSpacing:0.5}}>QUICK LOAD:</span>
+      {presets.map((p,i)=>(
+        <div key={i} style={{display:"flex",alignItems:"center",gap:0}}>
+          <button className="preset-btn" onClick={()=>doLoadPreset(p)}>{p.name}</button>
+          <button onClick={()=>doDeletePreset(i)} style={{background:"none",border:"none",color:C.gray,cursor:"pointer",fontSize:14,padding:"0 4px",lineHeight:1}} title="Remove">&times;</button>
+        </div>
+      ))}
+      {!showSavePreset
+        ? <button className="preset-btn" onClick={()=>setShowSavePreset(true)} style={{borderStyle:"dashed",color:C.orange}}>+ Save Current</button>
+        : <div style={{display:"flex",gap:4,alignItems:"center"}}>
+            <input value={presetName} onChange={e=>setPresetName(e.target.value)} placeholder="Preset name (e.g. L.D. Tebben)" onKeyDown={e=>e.key==="Enter"&&doSavePreset()}
+              style={{padding:"5px 10px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:12,width:180,outline:"none"}}/>
+            <button className="preset-btn" onClick={doSavePreset} style={{background:C.orange,color:"#fff",borderColor:C.orange}}>Save</button>
+            <button className="preset-btn" onClick={()=>setShowSavePreset(false)}>Cancel</button>
+          </div>}
+      <button className="preset-btn" onClick={doClear} style={{marginLeft:"auto",color:C.red,borderColor:"#fecaca"}}>Clear Form</button>
+    </div>
+
     <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:28,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
       <SecLabel>Client Information</SecLabel>
-      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}><Inp label="Company Name" value={form.clientCompany} onChange={s("clientCompany")} placeholder="L.D. Tebben Company" required/></div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}><Inp label="Company Name" value={form.clientCompany} onChange={s("clientCompany")} placeholder="L.D. Tebben Company" required autoComplete="organization"/></div>
       <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
-        <Inp label="Contact Name" value={form.clientContact} onChange={s("clientContact")} placeholder="Justin Boren" half/>
-        <Inp label="Title" value={form.clientTitle} onChange={s("clientTitle")} placeholder="Senior Technical Estimator" half/>
+        <Inp label="Contact Name" value={form.clientContact} onChange={s("clientContact")} placeholder="Justin Boren" half autoComplete="name"/>
+        <Inp label="Title" value={form.clientTitle} onChange={s("clientTitle")} placeholder="Senior Technical Estimator" half autoComplete="organization-title"/>
       </div>
       <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
-        <Inp label="Phone" value={form.clientPhone} onChange={s("clientPhone")} placeholder="(512) 663-9226" half/>
-        <Inp label="Email" value={form.clientEmail} onChange={s("clientEmail")} placeholder="jboren@ldtebben.com" half/>
+        <Inp label="Phone" value={form.clientPhone} onChange={s("clientPhone")} placeholder="(512) 663-9226" half autoComplete="tel"/>
+        <Inp label="Email" value={form.clientEmail} onChange={s("clientEmail")} placeholder="jboren@ldtebben.com" half autoComplete="email"/>
       </div>
 
       <SecLabel>Project Details</SecLabel>
       <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}><Inp label="Project Name" value={form.projectName} onChange={s("projectName")} placeholder="Crockett High School" required/></div>
-      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}><Inp label="Street Address" value={form.projectAddress} onChange={s("projectAddress")} placeholder="5601 Menchaca Rd" required/></div>
       <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
-        <Inp label="City" value={form.projectCity} onChange={s("projectCity")} placeholder="Austin" third/>
-        <Inp label="State" value={form.projectState} onChange={s("projectState")} placeholder="TX" third/>
-        <Inp label="ZIP" value={form.projectZip} onChange={s("projectZip")} placeholder="78745" third/>
+        <AddressAutocomplete value={form.projectAddress} onChange={s("projectAddress")} placeholder="5601 Menchaca Rd" required
+          onPlaceSelect={({address,city,state,zip})=>{
+            setForm(f=>({...f, projectAddress:address, projectCity:city, projectState:state, projectZip:zip}));
+          }}/>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+        <Inp label="City" value={form.projectCity} onChange={s("projectCity")} placeholder="Austin" third autoComplete="address-level2"/>
+        <Inp label="State" value={form.projectState} onChange={s("projectState")} placeholder="TX" third autoComplete="address-level1"/>
+        <Inp label="ZIP" value={form.projectZip} onChange={s("projectZip")} placeholder="78745" third autoComplete="postal-code"/>
       </div>
       <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
         <Inp label="Section / Area" value={form.projectSection} onChange={s("projectSection")} placeholder="North Section" half/>
@@ -193,16 +306,14 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
         <Inp label="Proposal Date" value={form.proposalDate} onChange={s("proposalDate")} type="date" third/>
       </div>
 
-      {/* Tax & Discounts */}
       <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-end",marginBottom:4}}>
         <div style={{flex:"0 0 31%",minWidth:140}}>
           <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>
             Rental Tax Rate {form.projectState && <span style={{fontWeight:400,color:C.gray}}>({form.projectState.toUpperCase()} base: {fmtPct(taxRate)})</span>}
           </label>
           <div style={{display:"flex",alignItems:"center",background:"#fff",border:`1px solid ${C.border}`,borderRadius:6,overflow:"hidden"}}>
-            <input type="number" step="0.01" value={form.taxRateOverride || (taxRate*100).toFixed(2)} 
+            <input type="number" step="0.01" value={form.taxRateOverride || (taxRate*100).toFixed(2)}
               onChange={e=>{const v=parseFloat(e.target.value); setForm(f=>({...f,taxRateOverride:e.target.value})); if(!isNaN(v)) setTaxRate(v/100);}}
-              placeholder={(taxRate*100).toFixed(2)}
               style={{flex:1,padding:"8px 12px",border:"none",outline:"none",fontSize:14,fontFamily:"'DM Sans',sans-serif",color:C.dark,background:"transparent",width:"100%"}}/>
             <span style={{padding:"8px 12px 8px 0",color:C.gray,fontSize:13}}>%</span>
           </div>
@@ -216,7 +327,6 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
         </div>
       </div>
 
-      {/* Pricing Summary with 3 Options */}
       {wetSF>0 && <div style={{marginTop:20}}>
         <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Payment Options Preview</div>
         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
@@ -224,22 +334,15 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
             <div key={oi} style={{flex:"1 1 240px",background:oi===1?"#fef7ed":"#f8fafc",border:`1px solid ${oi===1?C.orange:C.border}`,borderRadius:8,padding:14,position:"relative"}}>
               {oi===1 && <div style={{position:"absolute",top:-8,right:12,background:C.orange,color:"#fff",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4}}>STANDARD</div>}
               <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:8}}>{opt.label}</div>
-              <div style={{fontSize:11,color:C.gray,marginBottom:4}}>
-                Base: {fmtC(opt.ventBase)} {opt.adj!==0 && <span style={{color:opt.adj<0?C.green:C.orange}}>({opt.adj<0?"":"+"}{ (opt.adj*100).toFixed(0)}%)</span>}
-              </div>
+              <div style={{fontSize:11,color:C.gray,marginBottom:4}}>Base: {fmtC(opt.ventBase)} {opt.adj!==0 && <span style={{color:opt.adj<0?C.green:C.orange}}>({opt.adj<0?"":"+"}{ (opt.adj*100).toFixed(0)}%)</span>}</div>
               <div style={{fontSize:11,color:C.gray,marginBottom:4}}>Adjusted: {fmtC(opt.adjusted)}</div>
               {taxRate>0 && <div style={{fontSize:11,color:C.gray,marginBottom:4}}>Tax ({fmtPct(taxRate)}): {fmtC(opt.tax)}</div>}
               {opt.achDiscount>0 && <div style={{fontSize:11,color:C.green,marginBottom:4}}>ACH Discount: -{fmtC(opt.achDiscount)}</div>}
               <div style={{fontSize:15,fontWeight:800,color:C.navy,borderTop:`1px solid ${C.border}`,paddingTop:6,marginTop:4}}>
-                {fmtC(opt.total)}
-                {opt.achDiscount>0 && <span style={{fontSize:10,color:C.gray,fontWeight:400,marginLeft:4}}>w/ ACH</span>}
+                {fmtC(opt.total)} {opt.achDiscount>0 && <span style={{fontSize:10,color:C.gray,fontWeight:400,marginLeft:4}}>w/ ACH</span>}
               </div>
-              <div style={{marginTop:6}}>
-                {opt.payments.map((p,pi)=>(
-                  <div key={pi} style={{fontSize:11,color:C.gray,marginTop:2}}>{p.label}: {fmtC(p.amount)}</div>
-                ))}
-              </div>
-              {form.waiveScans && scanValue>0 && <div style={{fontSize:11,color:C.green,marginTop:4,fontStyle:"italic"}}>+ {fmtC(scanValue)} in scans included at no charge</div>}
+              <div style={{marginTop:6}}>{opt.payments.map((p,pi)=><div key={pi} style={{fontSize:11,color:C.gray,marginTop:2}}>{p.label}: {fmtC(p.amount)}</div>)}</div>
+              {form.waiveScans && opt.scanValue>0 && <div style={{fontSize:11,color:C.green,marginTop:4,fontStyle:"italic"}}>+ {fmtC(opt.scanValue)} in scans included at no charge</div>}
             </div>
           ))}
         </div>
@@ -249,7 +352,7 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
       <div onClick={()=>fileRef.current?.click()}
         onDragOver={e=>{e.preventDefault();e.stopPropagation()}}
         onDrop={e=>{e.preventDefault();e.stopPropagation();const f=e.dataTransfer.files[0];if(f&&f.type.startsWith("image/"))setVentMapFile(f)}}
-        style={{border:`2px dashed ${ventMapFile?C.orange:C.border}`,borderRadius:8,padding:24,textAlign:"center",cursor:"pointer",background:ventMapFile?"#fef7ed":"#fff",transition:"all 0.2s"}}>
+        style={{border:`2px dashed ${ventMapFile?C.orange:C.border}`,borderRadius:8,padding:24,textAlign:"center",cursor:"pointer",background:ventMapFile?"#fef7ed":"#fff"}}>
         <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&setVentMapFile(e.target.files[0])}/>
         {ventMapFile
           ? <div><div style={{fontSize:13,fontWeight:600,color:C.orange}}>&#10003; {ventMapFile.name}</div><div style={{fontSize:12,color:C.gray,marginTop:4}}>Click or drop to replace</div></div>
@@ -302,21 +405,16 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   const addr=[form.projectAddress,[form.projectCity,form.projectState].filter(Boolean).join(", "),form.projectZip].filter(Boolean).join(", ");
   const interval=form.scanInterval||"3";
 
-  // Check for payment success in URL
   useEffect(()=>{
     const params = new URLSearchParams(window.location.search);
     if(params.get("payment")==="success") setPaymentSuccess(true);
   },[]);
 
-  // Lookup tax rate
   useEffect(()=>{
     const st = form.projectState?.toUpperCase().trim();
     if(st && st.length===2){
       fetch(`${API}/api/tax-rate?state=${st}`).then(r=>r.json()).then(d=>{
-        if(d.rate !== undefined) {
-          const override = parseFloat(form.taxRateOverride);
-          setTaxRate(!isNaN(override) ? override/100 : d.rate);
-        }
+        if(d.rate !== undefined) { const ov=parseFloat(form.taxRateOverride); setTaxRate(!isNaN(ov)?ov/100:d.rate); }
       }).catch(()=>{});
     }
   },[form.projectState]);
@@ -324,25 +422,17 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   const options = calcOptions(form, taxRate);
 
   const doCheckout = async(optIndex, pmtIndex) => {
-    const opt = options[optIndex];
-    const pmt = opt.payments[pmtIndex];
+    const opt = options[optIndex]; const pmt = opt.payments[pmtIndex];
     const useAch = payingWith === "ach";
     const amount = useAch ? pmt.amount : pmt.amountNoAch;
     setCheckoutLoading(true);
     try {
-      const r = await fetch(`${API}/api/create-checkout`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({
-          proposalId, option: optIndex+1, paymentNumber: pmtIndex+1,
-          amountCents: Math.round(amount * 100),
-          description: `ReDry ${pmt.label} - ${form.projectName}`,
-          paymentMethod: useAch ? "ach" : "card",
-          clientCompany: form.clientCompany, projectName: form.projectName
-        })
-      });
+      const r = await fetch(`${API}/api/create-checkout`, {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({proposalId, option:optIndex+1, paymentNumber:pmtIndex+1, amountCents:Math.round(amount*100),
+          description:`ReDry ${pmt.label} - ${form.projectName}`, paymentMethod:useAch?"ach":"card",
+          clientCompany:form.clientCompany, projectName:form.projectName})});
       const d = await r.json();
-      if(d.url) window.location.href = d.url;
-      else alert("Error creating checkout: " + (d.error||"Unknown"));
+      if(d.url) window.location.href = d.url; else alert("Error: " + (d.error||"Unknown"));
     } catch(e) { alert("Payment error. Please try again."); }
     setCheckoutLoading(false);
   };
@@ -392,7 +482,6 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   );
 
   return (<div style={{minHeight:"100vh",background:C.bg}}>
-    {/* Top bar */}
     <div style={{background:C.navy,padding:"10px 0"}}>
       <div style={{maxWidth:820,margin:"0 auto",padding:"0 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span style={{color:"#fff",fontSize:13,fontWeight:600,letterSpacing:1}}>RE<span style={{color:C.orange}}>DRY</span></span>
@@ -401,13 +490,10 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
         </div>
       </div>
     </div>
-
     {paymentSuccess && <div style={{background:"#f0fdf4",borderBottom:"1px solid #bbf7d0",padding:"12px 20px",textAlign:"center"}}>
       <span style={{color:"#15803d",fontWeight:600,fontSize:14}}>&#10003; Payment received! Thank you.</span>
     </div>}
-
     <div style={{maxWidth:820,margin:"0 auto",padding:"32px 20px 60px"}}>
-      {/* Header */}
       <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden",marginBottom:24}}>
         <div style={{height:4,background:C.orange}}/>
         <div style={{padding:"28px 32px"}}>
@@ -438,14 +524,11 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           </div>
         </div>
       </div>
-
-      {/* Body */}
       <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
         {SH(1,"Project Overview")}
         <P>ReDry, LLC is the manufacturer and lessor of the ReDry 2-Way Vent System, a proprietary solar-powered drying system designed to remove trapped moisture from commercial roof insulation without membrane removal or tear-off. This proposal covers the lease of the ReDry Vent System and associated performance monitoring services for the {form.projectSection||"designated area"} of {form.projectName}, located at {addr}.</P>
         <P>A Roof MRI moisture survey identified approximately <strong>{fmtN(wetSF)} square feet</strong> of wet insulation within the project area. ReDry has engineered a vent Placement Map specific to this section based on the survey data{form.totalVents?<>, calling for an estimated <strong>{form.totalVents} vents</strong></>:""}.</P>
         <P>The roofing contractor is responsible for installing the 2-Way Vents per the ReDry Installation Specification. Following installation, ReDry will attach its proprietary ReDry Vent heads, confirm proper placement, and conduct periodic moisture scans to monitor drying progress.</P>
-
         {SH(2,"Scope of Work")}
         <Sub t="2.1 Vent System Furnishing and Commissioning"/>
         <B html="ReDry will furnish all ReDry 2-Way Vents and ReDry Vent heads per the engineered Placement Map."/>
@@ -453,27 +536,21 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
         <B html="The <strong>roofing contractor</strong> is solely responsible for installing and bonding the 2-Way Vents to the roof membrane per the Installation Specification."/>
         <B html="Following installation, ReDry will attach the proprietary ReDry Vent heads and confirm proper positioning."/>
         <B html="ReDry will complete photo documentation per specification requirements for warranty activation."/>
-
         <Sub t="2.2 Moisture Monitoring Program"/>
         <B html={`ReDry will perform <strong>${numScans} (${numWord(numScans)}) moisture scans</strong> at approximately <strong>${interval}-month intervals</strong> following installation.`}/>
         <B html="Each scan includes a full moisture survey using Roof MRI technology and a written report documenting moisture levels and drying progress."/>
         <B html={`A minimum of ${numScans} scans is required under this agreement regardless of drying timeline.`}/>
-
         <Sub t="2.3 Vent Retrieval and Performance Criteria"/>
         <P>The ReDry Vents remain the property of ReDry, LLC throughout the lease period. Vents will be retrieved once insulation reaches acceptable moisture readings on the Roof MRI PHD scale.</P>
         <PHDTable compact/>
-
         <Sub t="2.4 Exclusions"/>
         <B html="Installation and adhesive bonding of 2-Way Vents to the roof membrane (by roofing contractor)."/>
         <B html="Coring of roof membrane and insulation (by roofing contractor per ReDry spec)."/>
         <B html="Roof membrane repair, replacement, or coating (by others)."/>
         <B html="Structural deck repair or modification."/>
         <B html={`Any work beyond the ${form.projectSection||"designated"} boundary identified on the Placement Map.`}/>
-
         {SH(3,"Pricing and Payment Options")}
         <P>The vent system lease is based on <strong>{fmtN(wetSF)} square feet</strong> of identified wet insulation at <strong>{fmtC(rate)} per square foot</strong> (base: {fmtC(ventTotal)}). Applicable rental tax for {form.projectState||"the project state"} is included. Three payment options are available:</P>
-
-        {/* 3 Option Cards */}
         <div style={{display:"flex",gap:16,marginTop:16,flexWrap:"wrap"}}>
           {options.map((opt,oi)=>{
             const sel = selectedOption===oi;
@@ -482,47 +559,28 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
               {oi===1 && <div style={{position:"absolute",top:-10,right:12,background:C.navy,color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:4}}>STANDARD</div>}
               {oi===0 && <div style={{position:"absolute",top:-10,right:12,background:C.green,color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:4}}>BEST VALUE</div>}
               <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:10}}>{opt.label}</div>
-
               <div style={{fontSize:12,color:C.gray,marginBottom:3}}>Vent Lease: {fmtC(ventTotal)}</div>
-              {opt.adj!==0 && <div style={{fontSize:12,color:opt.adj<0?C.green:C.orange,marginBottom:3}}>
-                {opt.adj<0?"Discount":"Adjustment"}: {opt.adj<0?"":"+"}{ (opt.adj*100).toFixed(0)}% ({fmtC(opt.adjusted - ventTotal)})
-              </div>}
+              {opt.adj!==0 && <div style={{fontSize:12,color:opt.adj<0?C.green:C.orange,marginBottom:3}}>{opt.adj<0?"Discount":"Adjustment"}: {opt.adj<0?"":"+"}{ (opt.adj*100).toFixed(0)}% ({fmtC(opt.adjusted - ventTotal)})</div>}
               {taxRate>0 && <div style={{fontSize:12,color:C.gray,marginBottom:3}}>Tax ({fmtPct(taxRate)}): {fmtC(opt.tax)}</div>}
               {opt.achDiscount>0 && <div style={{fontSize:12,color:C.green,marginBottom:3}}>ACH Discount: -{fmtC(opt.achDiscount)}</div>}
-
               <div style={{borderTop:`2px solid ${C.navy}`,paddingTop:8,marginTop:8}}>
                 <div style={{fontSize:18,fontWeight:800,color:C.navy}}>{fmtC(opt.total)}</div>
                 {opt.achDiscount>0 && <div style={{fontSize:11,color:C.gray}}>({fmtC(opt.totalNoAch)} without ACH)</div>}
               </div>
-
-              <div style={{marginTop:10}}>
-                {opt.payments.map((p,pi)=>(
-                  <div key={pi} style={{background:"#f8fafc",borderRadius:6,padding:"8px 10px",marginTop:4,fontSize:12}}>
-                    <div style={{display:"flex",justifyContent:"space-between"}}>
-                      <strong style={{color:C.navy}}>{p.label}</strong>
-                      <strong style={{color:C.navy}}>{fmtC(p.amount)}</strong>
-                    </div>
-                    <div style={{color:C.gray,marginTop:2}}>{p.due}</div>
-                  </div>
-                ))}
-              </div>
-
-              {form.waiveScans && opt.scanValue>0 && <div style={{marginTop:8,padding:"6px 10px",background:"#f0fdf4",borderRadius:6,fontSize:12,color:C.green}}>
-                <strong>Included at no charge:</strong> {numScans} moisture scans ({fmtC(opt.scanValue)} value)
-              </div>}
-
-              {!form.waiveScans && <div style={{marginTop:8,fontSize:11,color:C.gray,fontStyle:"italic"}}>
-                + {numScans} scans invoiced separately ({fmtC(scanCost)}/scan)
-              </div>}
-
+              <div style={{marginTop:10}}>{opt.payments.map((p,pi)=>(
+                <div key={pi} style={{background:"#f8fafc",borderRadius:6,padding:"8px 10px",marginTop:4,fontSize:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><strong style={{color:C.navy}}>{p.label}</strong><strong style={{color:C.navy}}>{fmtC(p.amount)}</strong></div>
+                  <div style={{color:C.gray,marginTop:2}}>{p.due}</div>
+                </div>
+              ))}</div>
+              {form.waiveScans && opt.scanValue>0 && <div style={{marginTop:8,padding:"6px 10px",background:"#f0fdf4",borderRadius:6,fontSize:12,color:C.green}}><strong>Included at no charge:</strong> {numScans} moisture scans ({fmtC(opt.scanValue)} value)</div>}
+              {!form.waiveScans && <div style={{marginTop:8,fontSize:11,color:C.gray,fontStyle:"italic"}}>+ {numScans} scans invoiced separately ({fmtC(scanCost)}/scan)</div>}
               {sel && <div style={{marginTop:8,textAlign:"center"}}><span style={{display:"inline-block",background:C.orange,color:"#fff",padding:"4px 12px",borderRadius:4,fontSize:11,fontWeight:700}}>SELECTED</span></div>}
             </div>
           );})}
         </div>
-
         {SH(4,"General Conditions")}
-        {[
-          ["4.1 Relationship of Parties","ReDry is the manufacturer and lessor of the ReDry Vent System and is not a roofing contractor or subcontractor."],
+        {[["4.1 Relationship of Parties","ReDry is the manufacturer and lessor of the ReDry Vent System and is not a roofing contractor or subcontractor."],
           ["4.2 Roofing Contractor Responsibilities","The roofing contractor is solely responsible for installing and bonding the 2-Way Vents per the ReDry Installation Specification."],
           ["4.3 Installation Specification","All work shall be performed per ReDry Vent System Installation Specification SPEC-VENT-2026-01 (Rev. A)."],
           ["4.4 Placement Map","The ReDry Placement Map is a controlled engineering document and shall not be modified without written authorization from ReDry."],
@@ -532,38 +590,29 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           ["4.8 Proposal Validity",`This proposal is valid for thirty (30) days from date of issue (${vt}).`],
         ].map(([t,x])=><p key={t} style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"10px 0",textAlign:"justify"}}><strong style={{color:C.navy}}>{t}.</strong>&nbsp;&nbsp;{x}</p>)}
       </div>
-
-      {/* Vent Map */}
       {ventMapUrl && <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
         <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Exhibit A: Vent Placement Map</h2>
         <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
         <img src={ventMapUrl} alt="Vent Placement Map" style={{width:"100%",borderRadius:8,border:`1px solid ${C.border}`}}/>
       </div>}
-
-      {/* Acceptance & Payment */}
       <div style={{background:"#fff",borderRadius:12,border:`2px solid ${C.orange}`,padding:"28px 32px"}}>
         <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Acceptance and Payment</h2>
         <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
-
         {selectedOption===null && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:16}}>
           <div style={{fontSize:14,fontWeight:600,color:C.orange}}>Please select a payment option above to continue.</div>
         </div>}
-
         {selectedOption!==null && <>
           <P>By signing below, you accept this proposal under <strong>{options[selectedOption].label}</strong> and the terms described herein.</P>
-
           <div style={{display:"flex",gap:16,marginTop:20,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:200}}>
               <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Full Name / Title</label>
-              <input value={sigName} onChange={e=>setSigName(e.target.value)} placeholder="Jane Smith, VP of Operations" style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
+              <input value={sigName} onChange={e=>setSigName(e.target.value)} placeholder="Jane Smith, VP of Operations" autoComplete="name" style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
             </div>
             <div style={{flex:1,minWidth:200}}>
               <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Date</label>
               <input type="date" value={sigDate} onChange={e=>setSigDate(e.target.value)} style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
             </div>
           </div>
-
-          {/* Payment method toggle */}
           <div style={{marginTop:16,display:"flex",gap:8,alignItems:"center"}}>
             <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Payment method:</span>
             <button onClick={()=>setPayingWith("card")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
@@ -571,7 +620,6 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
               ACH / Bank Transfer {options[selectedOption].achDiscount>0 ? "(Save $100)" : ""}
             </button>
           </div>
-
           <button onClick={doAccept} disabled={!sigName||!sigDate||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&!submitting?"pointer":"not-allowed"}}>
             {submitting?"Submitting...":"Accept Proposal and Pay Deposit"}
           </button>
@@ -584,7 +632,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
 // ─── MAIN ───
 function App() {
   const [view,setView] = useState("loading");
-  const [form,setForm] = useState(defaultForm);
+  const [form,setForm] = useState(loadForm);
   const [ventMapFile,setVentMapFile] = useState(null);
   const [ventMapUrl,setVentMapUrl] = useState(null);
   const [loading,setLoading] = useState(null);
@@ -605,9 +653,7 @@ function App() {
         if(ventFile) setVentMapUrl(`${API}/api/proposal/${id}/ventmap`);
         setView("client");
       }).catch(()=>setView("form"));
-    } else {
-      setView("form");
-    }
+    } else { setView("form"); }
   },[]);
 
   useEffect(()=>{
