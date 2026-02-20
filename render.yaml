@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: redry-proposal-builder
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/proposals
+    envVars:
+      - key: PORT
+        value: 8080
