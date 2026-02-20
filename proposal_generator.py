@@ -471,7 +471,19 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
         story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;\u2022&nbsp;&nbsp;{item}", style_body))
 
     # ── 3. PRICING ──
+    story.append(PageBreak())
     story.append(Paragraph("3. PRICING", style_section_head))
+    story.append(Paragraph(
+        f"The following is a summary of the costs associated with the ReDry Vent System lease, commissioning, "
+        f"and moisture monitoring program for the {project_section} of {project_name}. "
+        f"The vent system lease rate is calculated based on <b>{wet_sf:,} square feet</b> of wet insulation "
+        f"identified during the Roof MRI moisture survey, at a rate of <b>{fmt_currency(rate_psf)} per square foot</b>."
+        + (f" Applicable rental tax of {tax_rate_val*100:.2f}% is included below." if tax_rate_val > 0 else "")
+        + ("" if waive_scans else f" The moisture monitoring program includes <b>{num_scans} scans</b> at "
+           f"<b>{scan_interval}-month intervals</b> to track drying progress and verify system performance."),
+        style_body
+    ))
+    story.append(Spacer(1, 8))
     pricing_data = [
         [Paragraph("Description", style_table_header),
          Paragraph("Quantity", style_table_header),
@@ -513,7 +525,7 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
         ('LEFTPADDING', (0, 0), (-1, -1), 8),
         ('RIGHTPADDING', (0, 0), (-1, -1), 8),
     ]))
-    story.append(pricing_table)
+    story.append(Spacer(1, 2))
 
     # Total row
     total_data = [
@@ -531,7 +543,8 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
         ('LEFTPADDING', (0, 0), (-1, -1), 8),
         ('RIGHTPADDING', (0, 0), (-1, -1), 8),
     ]))
-    story.append(total_table)
+
+    story.append(KeepTogether([pricing_table, total_table]))
     story.append(Spacer(1, 6))
 
     # ── 4. PAYMENT TERMS ──
