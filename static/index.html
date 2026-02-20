@@ -120,7 +120,8 @@ const defaultForm = {
   projectName:"", projectAddress:"", projectCity:"", projectState:"", projectZip:"",
   projectSection:"", wetSF:"", ratePSF:"2.00", scanCost:"4500", numScans:"4",
   scanInterval:"3", totalVents:"", proposalDate: new Date().toISOString().split("T")[0], validDays:"30",
-  taxRate:"", taxRateOverride:"", waiveScans: false
+  taxRate:"", taxRateOverride:"", waiveScans: false,
+  showOption0: false, showOption1: true, showOption2: false
 };
 
 // ─── localStorage helpers ───
@@ -148,9 +149,9 @@ function calcOptions(form, taxRate) {
     return { label, adj, adjusted, tax, achDiscount, total, totalNoAch, payments, scanValue, ventBase };
   };
   return [
-    build("Option 1: Pay in Full", -0.03, [{ pct:1.0, label:"Full Payment", due:"Due upon contract execution" }]),
-    build("Option 2: 50/50", 0, [{ pct:0.50, label:"Deposit (50%)", due:"Due upon contract execution" },{ pct:0.50, label:"Balance (50%)", due:"Within 15 days of ReDry vent install invoice" }]),
-    build("Option 3: 50/40/10", 0.03, [{ pct:0.50, label:"Deposit (50%)", due:"Due upon contract execution" },{ pct:0.40, label:"Progress (40%)", due:"Within 15 days of ReDry vent install invoice" },{ pct:0.10, label:"Final (10%)", due:"Due immediately upon removal of vents" }]),
+    build("Pay in Full", -0.03, [{ pct:1.0, label:"Full Payment", due:"Due upon contract execution" }]),
+    build("50% Now. 50% at Install.", 0, [{ pct:0.50, label:"Deposit (50%)", due:"Due upon contract execution" },{ pct:0.50, label:"Balance (50%)", due:"Due upon ReDry vent installation" }]),
+    build("Let\u2019s Get Going!", 0.03, [{ pct:0.10, label:"Deposit (10%)", due:"Due upon contract execution \u2014 2-Way Vents ship immediately" },{ pct:0.40, label:"Install Payment (40%)", due:"Due when ready for install \u2014 ReDry vent install scheduled 3 weeks out" },{ pct:0.50, label:"Final Payment (50%)", due:"Due upon ReDry vent installation" }]),
   ];
 }
 
@@ -328,23 +329,45 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
       </div>
 
       {wetSF>0 && <div style={{marginTop:20}}>
-        <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Payment Options Preview</div>
-        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-          {options.map((opt,oi)=>(
-            <div key={oi} style={{flex:"1 1 240px",background:oi===1?"#fef7ed":"#f8fafc",border:`1px solid ${oi===1?C.orange:C.border}`,borderRadius:8,padding:14,position:"relative"}}>
-              {oi===1 && <div style={{position:"absolute",top:-8,right:12,background:C.orange,color:"#fff",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4}}>STANDARD</div>}
-              <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:8}}>{opt.label}</div>
-              <div style={{fontSize:11,color:C.gray,marginBottom:4}}>Base: {fmtC(opt.ventBase)} {opt.adj!==0 && <span style={{color:opt.adj<0?C.green:C.orange}}>({opt.adj<0?"":"+"}{ (opt.adj*100).toFixed(0)}%)</span>}</div>
-              <div style={{fontSize:11,color:C.gray,marginBottom:4}}>Adjusted: {fmtC(opt.adjusted)}</div>
-              {taxRate>0 && <div style={{fontSize:11,color:C.gray,marginBottom:4}}>Tax ({fmtPct(taxRate)}): {fmtC(opt.tax)}</div>}
-              {opt.achDiscount>0 && <div style={{fontSize:11,color:C.green,marginBottom:4}}>ACH Discount: -{fmtC(opt.achDiscount)}</div>}
-              <div style={{fontSize:15,fontWeight:800,color:C.navy,borderTop:`1px solid ${C.border}`,paddingTop:6,marginTop:4}}>
-                {fmtC(opt.total)} {opt.achDiscount>0 && <span style={{fontSize:10,color:C.gray,fontWeight:400,marginLeft:4}}>w/ ACH</span>}
-              </div>
-              <div style={{marginTop:6}}>{opt.payments.map((p,pi)=><div key={pi} style={{fontSize:11,color:C.gray,marginTop:2}}>{p.label}: {fmtC(p.amount)}</div>)}</div>
-              {form.waiveScans && opt.scanValue>0 && <div style={{fontSize:11,color:C.green,marginTop:4,fontStyle:"italic"}}>+ {fmtC(opt.scanValue)} in scans included at no charge</div>}
-            </div>
+        <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Payment Options</div>
+
+        {/* Option toggles */}
+        <div style={{display:"flex",gap:16,marginBottom:14,flexWrap:"wrap"}}>
+          {["Pay in Full","50% Now. 50% at Install.","Let\u2019s Get Going!"].map((name,i)=>(
+            <label key={i} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:600,color:form[`showOption${i}`]?C.navy:C.gray}}>
+              <input type="checkbox" checked={form[`showOption${i}`]} onChange={e=>setForm(f=>({...f,[`showOption${i}`]:e.target.checked}))}
+                style={{width:16,height:16,accentColor:C.orange,cursor:"pointer"}}/>
+              {name}
+            </label>
           ))}
+        </div>
+
+        {/* Shared pricing summary */}
+        <div style={{background:"#f8fafc",borderRadius:8,padding:"12px 16px",marginBottom:12,fontSize:13,color:C.gray,lineHeight:1.7}}>
+          <span style={{fontWeight:600,color:C.navy}}>Base:</span> {fmtN(wetSF)} SF &times; {fmtC(rate)}/SF = {fmtC(ventTotal)}
+          {taxRate>0 && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.navy}}>Tax:</span> {fmtPct(taxRate)}</span>}
+          {options[0].achDiscount>0 && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.green}}>$100 ACH discount</span> available</span>}
+          {form.waiveScans && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.green}}>{numScans} scans included</span> ({fmtC(scanCost*numScans)} value)</span>}
+        </div>
+
+        {/* Option cards */}
+        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+          {options.map((opt,oi)=>{
+            if(!form[`showOption${oi}`]) return null;
+            return (
+            <div key={oi} style={{flex:"1 1 220px",background:oi===1?"#fef7ed":"#f8fafc",border:`1px solid ${oi===1?C.orange:C.border}`,borderRadius:8,padding:14,position:"relative"}}>
+              {oi===1 && <div style={{position:"absolute",top:-8,right:12,background:C.orange,color:"#fff",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4}}>DEFAULT</div>}
+              <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:6}}>{opt.label}</div>
+              {opt.adj!==0 && <div style={{fontSize:11,color:opt.adj<0?C.green:C.orange,marginBottom:6}}>{opt.adj<0?"3% discount applied":"3% convenience fee"}</div>}
+              <div style={{fontSize:20,fontWeight:800,color:C.navy,marginBottom:8}}>{fmtC(opt.total)}</div>
+              {opt.payments.map((p,pi)=>(
+                <div key={pi} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderTop:pi===0?`1px solid ${C.border}`:"none",marginTop:pi===0?4:0}}>
+                  <span style={{color:C.gray}}>{p.label}</span>
+                  <span style={{fontWeight:700,color:C.navy}}>{fmtC(p.amount)}</span>
+                </div>
+              ))}
+            </div>
+          );})}
         </div>
       </div>}
 
@@ -420,6 +443,12 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   },[form.projectState]);
 
   const options = calcOptions(form, taxRate);
+  const visibleOptions = options.map((opt,oi)=>({opt,oi})).filter(({oi})=> form[`showOption${oi}`] !== false);
+
+  // Auto-select if only one option visible
+  useEffect(()=>{
+    if(visibleOptions.length===1 && selectedOption===null) setSelectedOption(visibleOptions[0].oi);
+  },[visibleOptions.length]);
 
   const doCheckout = async(optIndex, pmtIndex) => {
     const opt = options[optIndex]; const pmt = opt.payments[pmtIndex];
@@ -462,7 +491,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
         <div style={{marginTop:24,padding:16,background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,color:C.gray}}>
           <div>Signed by: <strong style={{color:C.dark}}>{sigName}</strong></div>
           <div>Date: <strong style={{color:C.dark}}>{sigDate}</strong></div>
-          <div>Selected: <strong style={{color:C.dark}}>Option {selectedOption+1}</strong></div>
+          <div>Selected: <strong style={{color:C.dark}}>{options[selectedOption]?.label || `Option ${selectedOption+1}`}</strong></div>
         </div>
         {selectedOption!==null && <div style={{marginTop:20}}>
           <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:12}}>Pay Your Deposit</div>
@@ -549,35 +578,50 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
         <B html="Roof membrane repair, replacement, or coating (by others)."/>
         <B html="Structural deck repair or modification."/>
         <B html={`Any work beyond the ${form.projectSection||"designated"} boundary identified on the Placement Map.`}/>
-        {SH(3,"Pricing and Payment Options")}
-        <P>The vent system lease is based on <strong>{fmtN(wetSF)} square feet</strong> of identified wet insulation at <strong>{fmtC(rate)} per square foot</strong> (base: {fmtC(ventTotal)}). Applicable rental tax for {form.projectState||"the project state"} is included. Three payment options are available:</P>
+        {SH(3,"Pricing and Payment")}
+        <P>The vent system lease is based on <strong>{fmtN(wetSF)} square feet</strong> of identified wet insulation at <strong>{fmtC(rate)} per square foot</strong>.</P>
+
+        {/* Shared pricing details - show once */}
+        <div style={{background:"#f8fafc",borderRadius:8,padding:"14px 18px",margin:"12px 0 8px",fontSize:13,lineHeight:1.8,color:"#374151"}}>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Vent Lease:</span> {fmtC(ventTotal)}</div>
+          {taxRate>0 && <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Rental Tax:</span> {fmtPct(taxRate)} ({fmtC(round2(ventTotal*taxRate))})</div>}
+          {form.waiveScans && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>Included:</span> {numScans} moisture scans ({fmtC(scanCost*numScans)} value) at no additional charge</div>}
+          {!form.waiveScans && <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Scans:</span> {numScans} scans invoiced separately at {fmtC(scanCost)} each</div>}
+          {visibleOptions.length>0 && visibleOptions[0].achDiscount>0 && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>ACH Savings:</span> Save $100 when paying via bank transfer</div>}
+        </div>
+
+        {visibleOptions.length > 1 && <P>Select a payment option below:</P>}
+
         <div style={{display:"flex",gap:16,marginTop:16,flexWrap:"wrap"}}>
-          {options.map((opt,oi)=>{
+          {visibleOptions.map(({opt,oi})=>{
             const sel = selectedOption===oi;
+            const tags = {0:{text:"BEST VALUE",bg:C.green}, 1:{text:"MOST POPULAR",bg:C.navy}, 2:{text:"EASY START",bg:C.orange}};
+            const tag = tags[oi];
             return (
-            <div key={oi} onClick={()=>setSelectedOption(oi)} style={{flex:"1 1 240px",background:sel?"#fef7ed":"#fff",border:`2px solid ${sel?C.orange:C.border}`,borderRadius:10,padding:18,cursor:"pointer",position:"relative",transition:"all 0.2s"}}>
-              {oi===1 && <div style={{position:"absolute",top:-10,right:12,background:C.navy,color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:4}}>STANDARD</div>}
-              {oi===0 && <div style={{position:"absolute",top:-10,right:12,background:C.green,color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:4}}>BEST VALUE</div>}
-              <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:10}}>{opt.label}</div>
-              <div style={{fontSize:12,color:C.gray,marginBottom:3}}>Vent Lease: {fmtC(ventTotal)}</div>
-              {opt.adj!==0 && <div style={{fontSize:12,color:opt.adj<0?C.green:C.orange,marginBottom:3}}>{opt.adj<0?"Discount":"Adjustment"}: {opt.adj<0?"":"+"}{ (opt.adj*100).toFixed(0)}% ({fmtC(opt.adjusted - ventTotal)})</div>}
-              {taxRate>0 && <div style={{fontSize:12,color:C.gray,marginBottom:3}}>Tax ({fmtPct(taxRate)}): {fmtC(opt.tax)}</div>}
-              {opt.achDiscount>0 && <div style={{fontSize:12,color:C.green,marginBottom:3}}>ACH Discount: -{fmtC(opt.achDiscount)}</div>}
-              <div style={{borderTop:`2px solid ${C.navy}`,paddingTop:8,marginTop:8}}>
-                <div style={{fontSize:18,fontWeight:800,color:C.navy}}>{fmtC(opt.total)}</div>
-                {opt.achDiscount>0 && <div style={{fontSize:11,color:C.gray}}>({fmtC(opt.totalNoAch)} without ACH)</div>}
+            <div key={oi} onClick={()=>setSelectedOption(oi)} style={{flex:"1 1 240px",background:sel?"#fef7ed":"#fff",border:`2px solid ${sel?C.orange:C.border}`,borderRadius:10,padding:"20px 18px",cursor:"pointer",position:"relative",transition:"all 0.2s"}}>
+              {tag && <div style={{position:"absolute",top:-10,right:12,background:tag.bg,color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:4}}>{tag.text}</div>}
+              <div style={{fontSize:16,fontWeight:700,color:C.navy,marginBottom:4}}>{opt.label}</div>
+              {opt.adj!==0 && <div style={{fontSize:12,color:opt.adj<0?C.green:C.orange,marginBottom:8}}>{opt.adj<0?"3% discount for paying in full":"3% convenience fee applies"}</div>}
+              {opt.adj===0 && <div style={{fontSize:12,color:C.gray,marginBottom:8}}>Standard pricing</div>}
+              <div style={{fontSize:24,fontWeight:800,color:C.navy,marginBottom:12}}>{fmtC(opt.total)}</div>
+
+              {/* Payment schedule */}
+              <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10}}>
+                {opt.payments.map((p,pi)=>(
+                  <div key={pi} style={{marginBottom:pi<opt.payments.length-1?10:0}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:13,fontWeight:700,color:C.navy}}>{p.label}</span>
+                      <span style={{fontSize:15,fontWeight:800,color:C.navy}}>{fmtC(p.amount)}</span>
+                    </div>
+                    <div style={{fontSize:12,color:C.gray,marginTop:2}}>{p.due}</div>
+                  </div>
+                ))}
               </div>
-              <div style={{marginTop:10}}>{opt.payments.map((p,pi)=>(
-                <div key={pi} style={{background:"#f8fafc",borderRadius:6,padding:"8px 10px",marginTop:4,fontSize:12}}>
-                  <div style={{display:"flex",justifyContent:"space-between"}}><strong style={{color:C.navy}}>{p.label}</strong><strong style={{color:C.navy}}>{fmtC(p.amount)}</strong></div>
-                  <div style={{color:C.gray,marginTop:2}}>{p.due}</div>
-                </div>
-              ))}</div>
-              {form.waiveScans && opt.scanValue>0 && <div style={{marginTop:8,padding:"6px 10px",background:"#f0fdf4",borderRadius:6,fontSize:12,color:C.green}}><strong>Included at no charge:</strong> {numScans} moisture scans ({fmtC(opt.scanValue)} value)</div>}
-              {!form.waiveScans && <div style={{marginTop:8,fontSize:11,color:C.gray,fontStyle:"italic"}}>+ {numScans} scans invoiced separately ({fmtC(scanCost)}/scan)</div>}
-              {sel && <div style={{marginTop:8,textAlign:"center"}}><span style={{display:"inline-block",background:C.orange,color:"#fff",padding:"4px 12px",borderRadius:4,fontSize:11,fontWeight:700}}>SELECTED</span></div>}
+
+              {sel && <div style={{marginTop:12,textAlign:"center"}}><span style={{display:"inline-block",background:C.orange,color:"#fff",padding:"5px 16px",borderRadius:4,fontSize:12,fontWeight:700}}>&#10003; SELECTED</span></div>}
             </div>
           );})}
+        </div>
         </div>
         {SH(4,"General Conditions")}
         {[["4.1 Relationship of Parties","ReDry is the manufacturer and lessor of the ReDry Vent System and is not a roofing contractor or subcontractor."],
