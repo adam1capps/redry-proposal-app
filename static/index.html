@@ -443,7 +443,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   },[form.projectState]);
 
   const options = calcOptions(form, taxRate);
-  const visibleOptions = options.map((opt,oi)=>({opt,oi})).filter(({oi})=> form[`showOption${oi}`] !== false);
+  const visibleOptions = options.map((opt,oi)=>({opt,oi})).filter(({oi})=> form[`showOption${oi}`] === undefined || form[`showOption${oi}`] === true);
 
   // Auto-select if only one option visible
   useEffect(()=>{
@@ -587,7 +587,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           {taxRate>0 && <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Rental Tax:</span> {fmtPct(taxRate)} ({fmtC(round2(ventTotal*taxRate))})</div>}
           {form.waiveScans && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>Included:</span> {numScans} moisture scans ({fmtC(scanCost*numScans)} value) at no additional charge</div>}
           {!form.waiveScans && <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Scans:</span> {numScans} scans invoiced separately at {fmtC(scanCost)} each</div>}
-          {visibleOptions.length>0 && visibleOptions[0].achDiscount>0 && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>ACH Savings:</span> Save $100 when paying via bank transfer</div>}
+          {visibleOptions.length>0 && visibleOptions[0].opt.achDiscount>0 && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>ACH Savings:</span> Save $100 when paying via bank transfer</div>}
         </div>
 
         {visibleOptions.length > 1 && <P>Select a payment option below:</P>}
