@@ -197,7 +197,7 @@ function PHDTable({compact}) {
 }
 
 // ─── BUILDER FORM ───
-function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,taxRate,setTaxRate}) {
+function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,setResult,taxRate,setTaxRate}) {
   const fileRef = useRef();
   const [presets,setPresetsState] = useState(loadPresets());
   const [presetName,setPresetName] = useState("");
@@ -771,7 +771,7 @@ function App() {
 
   if(view==="loading") return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.gray}}>Loading...</div>;
   if(view==="client") return <ClientView form={form} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
-  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} taxRate={taxRate} setTaxRate={setTaxRate}/></div>);
+  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} setResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate}/></div>);
 }
 
 class ErrorBoundary extends React.Component {
