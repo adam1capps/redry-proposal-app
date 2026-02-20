@@ -415,15 +415,20 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
               placeholder="client@company.com" type="email"
               style={{flex:"1 1 200px",padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,color:C.dark,background:"#fff",outline:"none"}}/>
             <button onClick={async()=>{
+              console.log("SEND CLICKED", result.proposalId, result.sendEmail, form.clientEmail);
               const email = result.sendEmail||form.clientEmail;
               if(!email){alert("Enter an email address"); return;}
               setResult(r=>({...r,sending:true}));
               try{
-                const res = await fetch(`${API}/api/proposal/${result.proposalId}/send`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+                const url = `${API}/api/proposal/${result.proposalId}/send`;
+                console.log("SENDING TO", url, email);
+                const res = await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+                console.log("RESPONSE STATUS", res.status);
                 const d = await res.json();
+                console.log("RESPONSE DATA", d);
                 if(d.sent) setResult(r=>({...r,emailSent:true,sending:false,sentTo:email}));
                 else {alert("Failed to send: "+(d.error||"Unknown error")); setResult(r=>({...r,sending:false}));}
-              }catch(e){alert("Error sending email"); setResult(r=>({...r,sending:false}));}
+              }catch(e){console.error("SEND ERROR",e); alert("Error sending email: "+e.message); setResult(r=>({...r,sending:false}));}
             }} disabled={result.sending}
               style={{padding:"8px 20px",border:"none",borderRadius:6,background:result.sending?"#cbd5e1":C.orange,color:"#fff",fontSize:13,fontWeight:700,cursor:result.sending?"wait":"pointer",whiteSpace:"nowrap"}}>
               {result.sending?"Sending...":"Send to Client"}
