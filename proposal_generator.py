@@ -191,22 +191,27 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
     tax_amount = round(vent_system_total * tax_rate_val, 2)
     vent_subtotal = round(vent_system_total + tax_amount, 2)
     scan_total = 0 if waive_scans else round(scan_cost * num_scans, 2)
-    project_total = round(vent_subtotal + scan_total, 2)
     
-    # Payment option calculations
-    # Option 1: Pay in Full (3% discount)
-    pay_full_total = round(project_total * 0.97, 2)
-    pay_full_discount = round(project_total * 0.03, 2)
+    # Payment options are based on vent subtotal (vent lease + tax), NOT including scans
+    # This matches the web view's calcOptions logic
+    # Option 0: Pay in Full (3% discount on vent base, then tax)
+    pf_vent_discounted = round(vent_system_total * 0.97, 2)
+    pf_tax = round(pf_vent_discounted * tax_rate_val, 2)
+    pf_total = round(pf_vent_discounted + pf_tax, 2)
+    pf_savings = round(vent_subtotal - pf_total, 2)
     
-    # Option 2: 50/50 (standard)
-    deposit_50 = round(project_total / 2, 2)
-    balance_50 = round(project_total - deposit_50, 2)
+    # Option 1: Standard 50/50 (no adjustment)
+    std_total = vent_subtotal
+    std_deposit = round(std_total / 2, 2)
+    std_balance = round(std_total - std_deposit, 2)
     
-    # Option 3: Easy Start (3% convenience fee, 10/40/50 split)
-    easy_total = round(project_total * 1.03, 2)
-    easy_deposit = round(easy_total * 0.10, 2)
-    easy_install = round(easy_total * 0.40, 2)
-    easy_final = round(easy_total - easy_deposit - easy_install, 2)
+    # Option 2: Easy Start (3% convenience fee on vent base, then tax)
+    ez_vent_adjusted = round(vent_system_total * 1.03, 2)
+    ez_tax = round(ez_vent_adjusted * tax_rate_val, 2)
+    ez_total = round(ez_vent_adjusted + ez_tax, 2)
+    ez_deposit = round(ez_total * 0.10, 2)
+    ez_install = round(ez_total * 0.40, 2)
+    ez_final = round(ez_total - ez_deposit - ez_install, 2)
     
     proposal_date = datetime.strptime(proposal_date_str, "%Y-%m-%d")
     proposal_date_display = proposal_date.strftime("%B %d, %Y").replace(" 0", " ")
@@ -470,26 +475,25 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
     for item in exclusions:
         story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;\u2022&nbsp;&nbsp;{item}", style_body))
 
-    # ── 3. PRICING ──
+    # ── 3. PRICING & PAYMENT OPTIONS ──
     story.append(PageBreak())
-    story.append(Paragraph("3. PRICING", style_section_head))
+    story.append(Paragraph("3. PRICING & PAYMENT OPTIONS", style_section_head))
     story.append(Paragraph(
-        f"The following is a summary of the costs associated with the ReDry Vent System lease, commissioning, "
-        f"and moisture monitoring program for the {project_section} of {project_name}. "
-        f"The vent system lease rate is calculated based on <b>{wet_sf:,} square feet</b> of wet insulation "
-        f"identified during the Roof MRI moisture survey, at a rate of <b>{fmt_currency(rate_psf)} per square foot</b>."
-        + (f" Applicable rental tax of {tax_rate_val*100:.2f}% is included below." if tax_rate_val > 0 else "")
-        + ("" if waive_scans else f" The moisture monitoring program includes <b>{num_scans} scans</b> at "
-           f"<b>{scan_interval}-month intervals</b> to track drying progress and verify system performance."),
+        f"Based on the Roof MRI moisture survey, approximately <b>{wet_sf:,} square feet</b> of wet insulation "
+        f"was identified in the {project_section} of {project_name}. The ReDry 2-Way Vent System lease is "
+        f"calculated at <b>{fmt_currency(rate_psf)} per square foot</b>."
+        + (f" Applicable rental tax of {tax_rate_val*100:.2f}% is included." if tax_rate_val > 0 else ""),
         style_body
     ))
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 4))
+
+    # Line items table
     pricing_data = [
         [Paragraph("Description", style_table_header),
          Paragraph("Quantity", style_table_header),
          Paragraph("Unit Rate", style_table_header),
          Paragraph("Total", style_table_header)],
-        [Paragraph("ReDry 2-Way Vent System<br/>Lease and Commissioning", style_table_cell),
+        [Paragraph("ReDry 2-Way Vent System Lease", style_table_cell),
          Paragraph(f"{wet_sf:,} SF", style_table_cell),
          Paragraph(f"{fmt_currency(rate_psf)} / SF", style_table_cell_right),
          Paragraph(fmt_currency(vent_system_total), style_table_cell_bold_right)],
@@ -500,18 +504,6 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
             Paragraph("", style_table_cell),
             Paragraph("", style_table_cell_right),
             Paragraph(fmt_currency(tax_amount), style_table_cell_bold_right)])
-    if not waive_scans:
-        pricing_data.append([
-            Paragraph("Moisture Monitoring Scan", style_table_cell),
-            Paragraph(f"{num_scans} scans", style_table_cell),
-            Paragraph(f"{fmt_currency(scan_cost)} / scan", style_table_cell_right),
-            Paragraph(fmt_currency(scan_total), style_table_cell_bold_right)])
-    elif waive_scans:
-        pricing_data.append([
-            Paragraph("Moisture Monitoring Scans", style_table_cell),
-            Paragraph("", style_table_cell),
-            Paragraph("", style_table_cell_right),
-            Paragraph("Included", style_table_cell_bold_right)])
 
     pricing_table = Table(pricing_data, colWidths=[usable_width * 0.40, usable_width * 0.18, usable_width * 0.22, usable_width * 0.20])
     pricing_table.setStyle(TableStyle([
@@ -525,17 +517,16 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
         ('LEFTPADDING', (0, 0), (-1, -1), 8),
         ('RIGHTPADDING', (0, 0), (-1, -1), 8),
     ]))
-    story.append(Spacer(1, 2))
 
-    # Total row
-    total_data = [
+    # Vent subtotal row
+    subtotal_data = [
         [Paragraph("", style_table_cell),
          Paragraph("", style_table_cell),
-         Paragraph("CONTRACT TOTAL", style_table_cell_bold_right),
-         Paragraph(fmt_currency(project_total), style_table_cell_bold_right)]
+         Paragraph("VENT SYSTEM TOTAL", style_table_cell_bold_right),
+         Paragraph(fmt_currency(vent_subtotal), style_table_cell_bold_right)]
     ]
-    total_table = Table(total_data, colWidths=[usable_width * 0.40, usable_width * 0.18, usable_width * 0.22, usable_width * 0.20])
-    total_table.setStyle(TableStyle([
+    subtotal_table = Table(subtotal_data, colWidths=[usable_width * 0.40, usable_width * 0.18, usable_width * 0.22, usable_width * 0.20])
+    subtotal_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), NAVY),
         ('TEXTCOLOR', (0, 0), (-1, -1), WHITE),
         ('TOPPADDING', (0, 0), (-1, -1), 8),
@@ -544,181 +535,143 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
         ('RIGHTPADDING', (0, 0), (-1, -1), 8),
     ]))
 
-    story.append(KeepTogether([pricing_table, total_table]))
+    story.append(KeepTogether([pricing_table, subtotal_table]))
     story.append(Spacer(1, 6))
 
-    # ── 4. PAYMENT TERMS ──
-    story.append(PageBreak())
-    story.append(Paragraph("4. PAYMENT TERMS", style_section_head))
+    # Scan note
+    if waive_scans:
+        story.append(Paragraph(
+            f"<b>Moisture Monitoring:</b> {num_scans} scans at {scan_interval}-month intervals are "
+            f"<b>included at no additional charge</b> ({fmt_currency(scan_cost * num_scans)} value).",
+            ParagraphStyle('ScanNote', parent=style_body, textColor=HexColor("#228B22"))
+        ))
+    else:
+        story.append(Paragraph(
+            f"<b>Moisture Monitoring:</b> {num_scans} scans at {scan_interval}-month intervals will be invoiced "
+            f"separately at {fmt_currency(scan_cost)} per scan upon delivery of each report. "
+            f"Payment is due within 15 days of receipt.",
+            style_body
+        ))
+    story.append(Spacer(1, 12))
+
+    # ── Payment Options ──
+    story.append(Paragraph("PAYMENT OPTIONS", ParagraphStyle('PayOptHead', parent=style_section_head, fontSize=12, spaceBefore=4)))
     story.append(Paragraph(
-        "The following payment options are available for this project. The client shall select one payment "
-        "option upon acceptance of this proposal. All payments may be made online via the secure proposal link.",
+        "Select one of the following payment options when accepting this proposal online. "
+        "The payment option you choose determines your vent system lease total and payment schedule.",
         style_body
     ))
-    story.append(Spacer(1, 4))
+    story.append(Spacer(1, 6))
 
-    option_num = 0
+    # Helper to build a clean option box
+    option_box_style = TableStyle([
+        ('BOX', (0, 0), (-1, -1), 1, BORDER_GRAY),
+        ('BACKGROUND', (0, 0), (-1, 0), LIGHT_GRAY),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+        ('LINEBELOW', (0, 0), (-1, 0), 1, BORDER_GRAY),
+    ])
 
-    # Option: Pay in Full (3% discount)
+    option_label_style = ParagraphStyle('OptLabel', parent=style_body, fontName='Helvetica-Bold',
+                                         fontSize=11, textColor=NAVY, spaceAfter=0)
+    option_total_style = ParagraphStyle('OptTotal', parent=style_body, fontName='Helvetica-Bold',
+                                         fontSize=14, textColor=NAVY, alignment=TA_RIGHT, spaceAfter=0)
+    option_desc_style = ParagraphStyle('OptDesc', parent=style_small, fontSize=9, textColor=MED_GRAY, spaceAfter=0)
+    option_row_style = ParagraphStyle('OptRow', parent=style_body, fontSize=9.5, spaceAfter=0)
+    option_row_bold = ParagraphStyle('OptRowBold', parent=option_row_style, fontName='Helvetica-Bold', alignment=TA_RIGHT)
+
+    visible_options = []
+
     if show_option_0:
-        option_num += 1
-        story.append(Paragraph(f"<b>4.{option_num}  Option A: Pay in Full (3% Discount)</b>", style_body))
-        story.append(Paragraph(
-            f"Full payment of <b>{fmt_currency(pay_full_total)}</b> is due upon execution of this agreement. "
-            f"This reflects a <b>3% discount</b> ({fmt_currency(pay_full_discount)} savings) off the contract total of {fmt_currency(project_total)}.",
-            style_body
-        ))
-        pf_data = [
-            [Paragraph("Payment", style_table_header),
-             Paragraph("Amount", style_table_header),
-             Paragraph("Due", style_table_header)],
-            [Paragraph("Full Payment (3% discount applied)", style_table_cell),
-             Paragraph(fmt_currency(pay_full_total), style_table_cell_bold_right),
-             Paragraph("Upon contract execution", style_table_cell)],
+        rows = [
+            [Paragraph("Pay in Full", option_label_style),
+             Paragraph(fmt_currency(pf_total), option_total_style)],
+            [Paragraph(f"3% early-pay discount applied. You save {fmt_currency(pf_savings)}.", option_desc_style),
+             Paragraph("", option_desc_style)],
         ]
-        pf_table = Table(pf_data, colWidths=[usable_width * 0.45, usable_width * 0.20, usable_width * 0.35])
-        pf_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), NAVY),
-            ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
-            ('GRID', (0, 0), (-1, -1), 0.5, BORDER_GRAY),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LIGHT_GRAY, WHITE]),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-        ]))
-        story.append(pf_table)
-        story.append(Spacer(1, 8))
+        rows.append([Paragraph("Full Payment", option_row_style),
+                     Paragraph(fmt_currency(pf_total), option_row_bold)])
+        visible_options.append(rows)
 
-    # Option: 50/50 (standard)
     if show_option_1:
-        option_num += 1
-        label = "Option B" if show_option_0 else "Option A"
-        story.append(Paragraph(f"<b>4.{option_num}  {label}: Standard 50/50</b>", style_body))
-        story.append(Paragraph(
-            f"A deposit of <b>fifty percent (50%)</b> of the contract total ({fmt_currency(deposit_50)}) "
-            f"is due upon execution of this agreement. The remaining <b>fifty percent (50%)</b> ({fmt_currency(balance_50)}) "
-            f"is due upon completed installation.",
-            style_body
-        ))
-        std_data = [
-            [Paragraph("Payment", style_table_header),
-             Paragraph("Amount", style_table_header),
-             Paragraph("Due", style_table_header)],
-            [Paragraph("Deposit (50%)", style_table_cell),
-             Paragraph(fmt_currency(deposit_50), style_table_cell_bold_right),
-             Paragraph("Upon contract execution", style_table_cell)],
-            [Paragraph("Balance (50%)", style_table_cell),
-             Paragraph(fmt_currency(balance_50), style_table_cell_bold_right),
-             Paragraph("Upon installation completion", style_table_cell)],
+        rows = [
+            [Paragraph("50% Now. 50% at Install.", option_label_style),
+             Paragraph(fmt_currency(std_total), option_total_style)],
+            [Paragraph("Standard terms. Split into two equal payments.", option_desc_style),
+             Paragraph("", option_desc_style)],
+            [Paragraph("Deposit (50%)", option_row_style),
+             Paragraph(fmt_currency(std_deposit), option_row_bold)],
+            [Paragraph("Balance at Installation (50%)", option_row_style),
+             Paragraph(fmt_currency(std_balance), option_row_bold)],
         ]
-        std_table = Table(std_data, colWidths=[usable_width * 0.45, usable_width * 0.20, usable_width * 0.35])
-        std_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), NAVY),
-            ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
-            ('GRID', (0, 0), (-1, -1), 0.5, BORDER_GRAY),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LIGHT_GRAY, WHITE]),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-        ]))
-        story.append(std_table)
-        story.append(Spacer(1, 8))
+        visible_options.append(rows)
 
-    # Option: Easy Start (3% convenience fee, 10/40/50)
     if show_option_2:
-        option_num += 1
-        labels = {1: "A", 2: "B", 3: "C"}
-        label = f"Option {labels.get(option_num, 'C')}"
-        story.append(Paragraph(f"<b>4.{option_num}  {label}: Let's Get Going! (Easy Start)</b>", style_body))
-        story.append(Paragraph(
-            f"Get started with just <b>{fmt_currency(easy_deposit)}</b> down. A 3% convenience fee applies, "
-            f"bringing the adjusted total to <b>{fmt_currency(easy_total)}</b>. Payments are split 10% / 40% / 50%.",
-            style_body
-        ))
-        ez_data = [
-            [Paragraph("Payment", style_table_header),
-             Paragraph("Amount", style_table_header),
-             Paragraph("Due", style_table_header)],
-            [Paragraph("Deposit (10%)", style_table_cell),
-             Paragraph(fmt_currency(easy_deposit), style_table_cell_bold_right),
-             Paragraph("Upon contract execution", style_table_cell)],
-            [Paragraph("Progress Payment (40%)", style_table_cell),
-             Paragraph(fmt_currency(easy_install), style_table_cell_bold_right),
-             Paragraph("Prior to installation", style_table_cell)],
-            [Paragraph("Final Payment (50%)", style_table_cell),
-             Paragraph(fmt_currency(easy_final), style_table_cell_bold_right),
-             Paragraph("Upon installation completion", style_table_cell)],
+        rows = [
+            [Paragraph("Let\u2019s Get Going!", option_label_style),
+             Paragraph(fmt_currency(ez_total), option_total_style)],
+            [Paragraph("Lowest deposit to get started. 3% convenience fee applies.", option_desc_style),
+             Paragraph("", option_desc_style)],
+            [Paragraph("Deposit (10%)", option_row_style),
+             Paragraph(fmt_currency(ez_deposit), option_row_bold)],
+            [Paragraph("Install Payment (40%)", option_row_style),
+             Paragraph(fmt_currency(ez_install), option_row_bold)],
+            [Paragraph("Final Payment (50%)", option_row_style),
+             Paragraph(fmt_currency(ez_final), option_row_bold)],
         ]
-        ez_table = Table(ez_data, colWidths=[usable_width * 0.45, usable_width * 0.20, usable_width * 0.35])
-        ez_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), NAVY),
-            ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
-            ('GRID', (0, 0), (-1, -1), 0.5, BORDER_GRAY),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LIGHT_GRAY, WHITE]),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-        ]))
-        story.append(ez_table)
+        visible_options.append(rows)
+
+    for opt_rows in visible_options:
+        opt_table = Table(opt_rows, colWidths=[usable_width * 0.65, usable_width * 0.35])
+        opt_table.setStyle(option_box_style)
+        story.append(KeepTogether([opt_table]))
         story.append(Spacer(1, 8))
 
-    # Scan payment terms (if not waived)
-    if not waive_scans:
-        option_num += 1
-        story.append(Paragraph(f"<b>4.{option_num}  Moisture Monitoring Scans</b>", style_body))
-        story.append(Paragraph(
-            f"Each moisture scan ({fmt_currency(scan_cost)} per scan) shall be invoiced individually upon delivery of the scan "
-            f"report. Payment is due within <b>fifteen (15) days</b> of receipt of the report. "
-            f"All {num_scans} scans are guaranteed under this agreement and are non-cancelable.",
-            style_body
-        ))
-
-    # ── 5. GENERAL CONDITIONS ──
-    story.append(Paragraph("5. GENERAL CONDITIONS", style_section_head))
+    # ── 4. GENERAL CONDITIONS ──
+    story.append(Paragraph("4. GENERAL CONDITIONS", style_section_head))
     conditions = [
-        ("5.1  Relationship of Parties",
+        ("4.1  Relationship of Parties",
          "ReDry is the manufacturer and lessor of the ReDry Vent System and is not a roofing contractor or subcontractor. "
          "ReDry's role is limited to furnishing the vent system, engineering the Placement Map, attaching the ReDry Vent heads, "
          "confirming vent placement, and providing ongoing moisture monitoring services."),
-        ("5.2  Roofing Contractor Responsibilities",
+        ("4.2  Roofing Contractor Responsibilities",
          "The roofing contractor engaged by the client or general contractor is solely responsible for installing and bonding the 2-Way "
          "Vents to the roof membrane in accordance with the ReDry Installation Specification (SPEC-VENT-2026-01, Rev. A). This includes "
          "all coring, adhesive application, membrane flash-in, and related roofing work. ReDry assumes no liability for the quality or "
          "workmanship of the roofing contractor's installation."),
-        ("5.3  Installation Specification",
+        ("4.3  Installation Specification",
          "All 2-Way Vent installation work shall be performed by the roofing contractor in accordance with ReDry Vent System "
          "Installation Specification SPEC-VENT-2026-01 (Rev. A). A copy of the specification will be provided to the roofing "
          "contractor and is incorporated herein by reference."),
-        ("5.4  Placement Map",
+        ("4.4  Placement Map",
          "The ReDry Placement Map is a controlled engineering document generated from project-specific moisture survey data. "
          "The Placement Map shall not be modified by the roofing contractor or any other party without prior written authorization from ReDry."),
-        ("5.5  Warranty",
+        ("4.5  Warranty",
          "System warranty activation requires complete photo documentation, a passed QC inspection per the installation specification, "
          "and installation by a qualified roofing contractor. Warranty terms and coverage details are provided under separate cover upon request."),
-        ("5.6  Equipment Ownership and Retrieval",
+        ("4.6  Equipment Ownership and Retrieval",
          "All ReDry Vent heads furnished under this agreement remain the sole property of ReDry, LLC throughout the lease period. "
          "The client shall not remove, relocate, or tamper with the ReDry Vents without prior written authorization. "
          'ReDry will retrieve the vent heads once the served area reaches an acceptable "Dry" reading on the PHD scale as described in Section 2.3. '
          "Upon retrieval, the roofing contractor or client is responsible for sealing the remaining 2-Way Vent penetrations per standard roofing practice."),
-        ("5.7  Access and Coordination",
+        ("4.7  Access and Coordination",
          "The client or general contractor shall provide safe, unobstructed access to the roof area during ReDry's commissioning visit "
          "and each scheduled moisture scan. Scheduling will be coordinated with the client to minimize disruption to building operations."),
-        ("5.8  Weather Delays",
+        ("4.8  Weather Delays",
          "Installation of 2-Way Vents by the roofing contractor requires dry conditions per adhesive manufacturer specifications. "
          "ReDry's commissioning visit will be scheduled following completion of the contractor's installation. In the event of weather "
          "delays, the project schedule will be adjusted accordingly at no additional cost."),
-        ("5.9  Proposal Validity",
+        ("4.9  Proposal Validity",
          f"This proposal is valid for thirty (30) days from the date of issue ({valid_through}). "
          "Pricing is subject to revision after that date."),
     ]
     for title, text in conditions:
         story.append(Paragraph(f"<b>{title}.</b>&nbsp;&nbsp;{text}", style_body))
 
-    # ── 6. ACCEPTANCE ──
-    story.append(Paragraph("6. ACCEPTANCE", style_section_head))
+    # ── 5. ACCEPTANCE ──
+    story.append(Paragraph("5. ACCEPTANCE", style_section_head))
     story.append(Paragraph(
         "To accept this proposal, please visit the secure proposal link below. You will be able to review "
         "the full proposal, select your preferred payment option, provide your electronic signature, and "
