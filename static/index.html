@@ -334,8 +334,8 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
         {/* Option toggles */}
         <div style={{display:"flex",gap:16,marginBottom:14,flexWrap:"wrap"}}>
           {["Pay in Full","50% Now. 50% at Install.","Let\u2019s Get Going!"].map((name,i)=>(
-            <label key={i} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:600,color:form[`showOption${i}`]?C.navy:C.gray}}>
-              <input type="checkbox" checked={form[`showOption${i}`]} onChange={e=>setForm(f=>({...f,[`showOption${i}`]:e.target.checked}))}
+            <label key={i} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:600,color:!!form[`showOption${i}`]?C.navy:C.gray}}>
+              <input type="checkbox" checked={!!form[`showOption${i}`]} onChange={e=>setForm(f=>({...f,[`showOption${i}`]:e.target.checked}))}
                 style={{width:16,height:16,accentColor:C.orange,cursor:"pointer"}}/>
               {name}
             </label>
@@ -446,9 +446,11 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   const visibleOptions = options.map((opt,oi)=>({opt,oi})).filter(({oi})=> form[`showOption${oi}`] === undefined || form[`showOption${oi}`] === true);
 
   // Auto-select if only one option visible
+  const visibleCount = visibleOptions.length;
+  const singleOptionIndex = visibleCount === 1 ? visibleOptions[0].oi : null;
   useEffect(()=>{
-    if(visibleOptions.length===1 && selectedOption===null) setSelectedOption(visibleOptions[0].oi);
-  },[visibleOptions.length]);
+    if(singleOptionIndex !== null && selectedOption === null) setSelectedOption(singleOptionIndex);
+  },[singleOptionIndex]);
 
   const doCheckout = async(optIndex, pmtIndex) => {
     const opt = options[optIndex]; const pmt = opt.payments[pmtIndex];
@@ -732,7 +734,19 @@ function App() {
   return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} taxRate={taxRate} setTaxRate={setTaxRate}/></div>);
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  render() {
+    if (this.state.hasError) return React.createElement("div", {style:{padding:40,textAlign:"center"}},
+      React.createElement("h2", {style:{color:"#dc2626"}}, "Something went wrong"),
+      React.createElement("pre", {style:{fontSize:12,color:"#64748b",marginTop:12,textAlign:"left",maxWidth:600,margin:"12px auto",whiteSpace:"pre-wrap"}}, String(this.state.error))
+    );
+    return this.props.children;
+  }
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(ErrorBoundary, null, React.createElement(App)));
 </script>
 </body>
 </html>
