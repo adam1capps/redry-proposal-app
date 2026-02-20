@@ -197,7 +197,7 @@ function PHDTable({compact}) {
 }
 
 // ─── BUILDER FORM ───
-function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,setResult,taxRate,setTaxRate}) {
+function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,taxRate,setTaxRate}) {
   const fileRef = useRef();
   const [presets,setPresetsState] = useState(loadPresets());
   const [presetName,setPresetName] = useState("");
@@ -411,14 +411,14 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
         {/* Send to Client via Email */}
         <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
           {!result.emailSent ? (<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            <input value={result.sendEmail||form.clientEmail||""} onChange={e=>setResult(r=>({...r,sendEmail:e.target.value}))}
+            <input value={result.sendEmail||form.clientEmail||""} onChange={e=>onSetResult(r=>({...r,sendEmail:e.target.value}))}
               placeholder="client@company.com" type="email"
               style={{flex:"1 1 200px",padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,color:C.dark,background:"#fff",outline:"none"}}/>
             <button onClick={async()=>{
               console.log("SEND CLICKED", result.proposalId, result.sendEmail, form.clientEmail);
               const email = result.sendEmail||form.clientEmail;
               if(!email){alert("Enter an email address"); return;}
-              setResult(r=>({...r,sending:true}));
+              onSetResult(r=>({...r,sending:true}));
               try{
                 const url = `${API}/api/proposal/${result.proposalId}/send`;
                 console.log("SENDING TO", url, email);
@@ -426,9 +426,9 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
                 console.log("RESPONSE STATUS", res.status);
                 const d = await res.json();
                 console.log("RESPONSE DATA", d);
-                if(d.sent) setResult(r=>({...r,emailSent:true,sending:false,sentTo:email}));
-                else {alert("Failed to send: "+(d.error||"Unknown error")); setResult(r=>({...r,sending:false}));}
-              }catch(e){console.error("SEND ERROR",e); alert("Error sending email: "+e.message); setResult(r=>({...r,sending:false}));}
+                if(d.sent) onSetResult(r=>({...r,emailSent:true,sending:false,sentTo:email}));
+                else {alert("Failed to send: "+(d.error||"Unknown error")); onSetResult(r=>({...r,sending:false}));}
+              }catch(e){console.error("SEND ERROR",e); alert("Error sending email: "+e.message); onSetResult(r=>({...r,sending:false}));}
             }} disabled={result.sending}
               style={{padding:"8px 20px",border:"none",borderRadius:6,background:result.sending?"#cbd5e1":C.orange,color:"#fff",fontSize:13,fontWeight:700,cursor:result.sending?"wait":"pointer",whiteSpace:"nowrap"}}>
               {result.sending?"Sending...":"Send to Client"}
@@ -776,7 +776,7 @@ function App() {
 
   if(view==="loading") return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.gray}}>Loading...</div>;
   if(view==="client") return <ClientView form={form} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
-  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} setResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate}/></div>);
+  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} onSetResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate}/></div>);
 }
 
 class ErrorBoundary extends React.Component {
