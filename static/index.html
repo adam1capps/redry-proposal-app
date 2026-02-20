@@ -20,7 +20,7 @@ a { color: inherit; }
 <script type="text/babel">
 const { useState, useRef, useEffect, useCallback } = React;
 
-const C = { orange: "#E8943A", navy: "#1B2A4A", dark: "#1a1a2e", gray: "#64748b", bg: "#f8f9fb", border: "#e2e8f0" };
+const C = { orange: "#E8943A", navy: "#1B2A4A", dark: "#1a1a2e", gray: "#64748b", bg: "#f8f9fb", border: "#e2e8f0", green: "#16a34a", red: "#dc2626" };
 const API = "";
 
 const PHD = {
@@ -32,28 +32,71 @@ const PHD = {
 const numWord = n => ["zero","one","two","three","four","five","six","seven","eight","nine","ten"][n] || String(n);
 const fmtC = v => new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(v);
 const fmtN = v => new Intl.NumberFormat("en-US").format(v);
+const fmtPct = v => (v*100).toFixed(2).replace(/\.?0+$/,"") + "%";
 const fmtDate = s => new Date(s).toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
 const addDays = (s,d) => { const dt=new Date(s); dt.setDate(dt.getDate()+d); return fmtDate(dt); };
 const propNum = s => { const d=new Date(s); return `P-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}`; };
+const round2 = v => Math.round(v*100)/100;
 
 const defaultForm = {
   clientCompany:"", clientContact:"", clientTitle:"", clientPhone:"", clientEmail:"",
   projectName:"", projectAddress:"", projectCity:"", projectState:"", projectZip:"",
   projectSection:"", wetSF:"", ratePSF:"2.00", scanCost:"4500", numScans:"4",
-  scanInterval:"3", totalVents:"", proposalDate: new Date().toISOString().split("T")[0], validDays:"30"
+  scanInterval:"3", totalVents:"", proposalDate: new Date().toISOString().split("T")[0], validDays:"30",
+  taxRate:"", taxRateOverride:"", waiveScans: false
 };
 
-function Inp({label,value,onChange,type="text",placeholder,prefix,suffix,half,third,required}) {
+// ─── PAYMENT OPTION CALCULATOR ───
+function calcOptions(form, taxRate) {
+  const wetSF=parseFloat(form.wetSF)||0, rate=parseFloat(form.ratePSF)||0;
+  const scanCost=parseFloat(form.scanCost)||0, numScans=parseInt(form.numScans)||0;
+  const ventBase = wetSF * rate;
+  const scanTotal = form.waiveScans ? 0 : scanCost * numScans;
+  const scanValue = scanCost * numScans; // value even if waived
+  const tr = taxRate || 0;
+
+  const build = (label, adj, splits) => {
+    const adjusted = round2(ventBase * (1 + adj));
+    const tax = round2(adjusted * tr);
+    const subtotalPreDiscount = adjusted + tax;
+    const achDiscount = subtotalPreDiscount >= 10000 ? 100 : 0;
+    const total = round2(subtotalPreDiscount - achDiscount);
+    const totalNoAch = round2(subtotalPreDiscount);
+    const payments = splits.map(s => ({
+      ...s,
+      amount: round2(total * s.pct),
+      amountNoAch: round2(totalNoAch * s.pct),
+    }));
+    return { label, adj, adjusted, tax, achDiscount, total, totalNoAch, payments, scanTotal, scanValue, ventBase };
+  };
+
+  return [
+    build("Option 1: Pay in Full", -0.03, [
+      { pct: 1.0, label: "Full Payment", due: "Due upon contract execution" }
+    ]),
+    build("Option 2: 50/50", 0, [
+      { pct: 0.50, label: "Deposit (50%)", due: "Due upon contract execution" },
+      { pct: 0.50, label: "Balance (50%)", due: "Within 15 days of ReDry vent install invoice" }
+    ]),
+    build("Option 3: 50/40/10", 0.03, [
+      { pct: 0.50, label: "Deposit (50%)", due: "Due upon contract execution" },
+      { pct: 0.40, label: "Progress (40%)", due: "Within 15 days of ReDry vent install invoice" },
+      { pct: 0.10, label: "Final (10%)", due: "Due immediately upon removal of vents" }
+    ]),
+  ];
+}
+
+function Inp({label,value,onChange,type="text",placeholder,prefix,suffix,half,third,required,disabled}) {
   const st = {flex: half?"0 0 48%":third?"0 0 31%":"1 1 100%", minWidth: third?140:half?200:0};
   return (
     <div style={st}>
       <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4,letterSpacing:0.3}}>
         {label} {required && <span style={{color:C.orange}}>*</span>}
       </label>
-      <div style={{display:"flex",alignItems:"center",background:"#fff",border:`1px solid ${C.border}`,borderRadius:6,overflow:"hidden"}}>
+      <div style={{display:"flex",alignItems:"center",background:disabled?"#f1f5f9":"#fff",border:`1px solid ${C.border}`,borderRadius:6,overflow:"hidden"}}>
         {prefix && <span style={{padding:"8px 0 8px 12px",color:C.gray,fontSize:14,fontWeight:500}}>{prefix}</span>}
-        <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
-          style={{flex:1,padding:prefix?"8px 12px 8px 4px":"8px 12px",border:"none",outline:"none",fontSize:14,fontFamily:"'DM Sans',sans-serif",color:C.dark,background:"transparent",width:"100%"}}/>
+        <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} disabled={disabled}
+          style={{flex:1,padding:prefix?"8px 12px 8px 4px":"8px 12px",border:"none",outline:"none",fontSize:14,fontFamily:"'DM Sans',sans-serif",color:disabled?C.gray:C.dark,background:"transparent",width:"100%"}}/>
         {suffix && <span style={{padding:"8px 12px 8px 0",color:C.gray,fontSize:13}}>{suffix}</span>}
       </div>
     </div>
@@ -85,15 +128,29 @@ function PHDTable({compact}) {
 }
 
 // ─── BUILDER FORM ───
-function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result}) {
+function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,taxRate,setTaxRate}) {
   const fileRef = useRef();
   const s = k => v => setForm(f=>({...f,[k]:v}));
   const wetSF=parseFloat(form.wetSF)||0, rate=parseFloat(form.ratePSF)||0;
   const scanCost=parseFloat(form.scanCost)||0, numScans=parseInt(form.numScans)||0;
-  const ventTotal=wetSF*rate, scanTotal=scanCost*numScans, total=ventTotal+scanTotal;
+  const ventTotal=wetSF*rate;
+  const scanTotal=form.waiveScans ? 0 : scanCost*numScans;
+  const scanValue=scanCost*numScans;
   const ok = form.clientCompany && form.projectName && form.projectAddress && wetSF>0;
 
-  return (<div style={{maxWidth:780,margin:"0 auto"}}>
+  // Auto-lookup tax rate when state changes
+  useEffect(()=>{
+    const st = form.projectState?.toUpperCase().trim();
+    if(st && st.length===2){
+      fetch(`${API}/api/tax-rate?state=${st}`).then(r=>r.json()).then(d=>{
+        if(d.rate !== undefined && !form.taxRateOverride) setTaxRate(d.rate);
+      }).catch(()=>{});
+    }
+  },[form.projectState]);
+
+  const options = calcOptions(form, taxRate);
+
+  return (<div style={{maxWidth:820,margin:"0 auto"}}>
     <div style={{textAlign:"center",marginBottom:32}}>
       <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>ReDry Proposal Builder</div>
       <h1 style={{fontSize:28,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>Create New Proposal</h1>
@@ -130,22 +187,61 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
         <Inp label="Rate" value={form.ratePSF} onChange={s("ratePSF")} prefix="$" suffix="/ SF" type="number" third/>
         <Inp label="Scan Cost" value={form.scanCost} onChange={s("scanCost")} prefix="$" suffix="/ scan" type="number" third/>
       </div>
-      <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
         <Inp label="Number of Scans" value={form.numScans} onChange={s("numScans")} type="number" third/>
         <Inp label="Scan Interval" value={form.scanInterval} onChange={s("scanInterval")} suffix="months" type="number" third/>
         <Inp label="Proposal Date" value={form.proposalDate} onChange={s("proposalDate")} type="date" third/>
       </div>
 
-      {wetSF>0 && <div style={{marginTop:20,background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:8,padding:16}}>
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:13,color:C.gray,marginBottom:6}}>
-          <span>Vent System Lease: {fmtN(wetSF)} SF × {fmtC(rate)}</span><span style={{fontWeight:600,color:C.dark}}>{fmtC(ventTotal)}</span>
+      {/* Tax & Discounts */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-end",marginBottom:4}}>
+        <div style={{flex:"0 0 31%",minWidth:140}}>
+          <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>
+            Rental Tax Rate {form.projectState && <span style={{fontWeight:400,color:C.gray}}>({form.projectState.toUpperCase()} base: {fmtPct(taxRate)})</span>}
+          </label>
+          <div style={{display:"flex",alignItems:"center",background:"#fff",border:`1px solid ${C.border}`,borderRadius:6,overflow:"hidden"}}>
+            <input type="number" step="0.01" value={form.taxRateOverride || (taxRate*100).toFixed(2)} 
+              onChange={e=>{const v=parseFloat(e.target.value); setForm(f=>({...f,taxRateOverride:e.target.value})); if(!isNaN(v)) setTaxRate(v/100);}}
+              placeholder={(taxRate*100).toFixed(2)}
+              style={{flex:1,padding:"8px 12px",border:"none",outline:"none",fontSize:14,fontFamily:"'DM Sans',sans-serif",color:C.dark,background:"transparent",width:"100%"}}/>
+            <span style={{padding:"8px 12px 8px 0",color:C.gray,fontSize:13}}>%</span>
+          </div>
         </div>
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:13,color:C.gray,marginBottom:8}}>
-          <span>Moisture Scans: {numScans} × {fmtC(scanCost)}</span><span style={{fontWeight:600,color:C.dark}}>{fmtC(scanTotal)}</span>
+        <div style={{flex:"0 0 31%",minWidth:140,display:"flex",alignItems:"center",height:40,paddingBottom:2}}>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy}}>
+            <input type="checkbox" checked={form.waiveScans} onChange={e=>setForm(f=>({...f,waiveScans:e.target.checked}))}
+              style={{width:18,height:18,accentColor:C.orange,cursor:"pointer"}}/>
+            Waive scan fees (added value)
+          </label>
         </div>
-        <div style={{borderTop:`2px solid ${C.navy}`,paddingTop:8,display:"flex",justifyContent:"space-between"}}>
-          <span style={{fontSize:14,fontWeight:700,color:C.navy}}>Contract Total</span>
-          <span style={{fontSize:18,fontWeight:800,color:C.navy}}>{fmtC(total)}</span>
+      </div>
+
+      {/* Pricing Summary with 3 Options */}
+      {wetSF>0 && <div style={{marginTop:20}}>
+        <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Payment Options Preview</div>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+          {options.map((opt,oi)=>(
+            <div key={oi} style={{flex:"1 1 240px",background:oi===1?"#fef7ed":"#f8fafc",border:`1px solid ${oi===1?C.orange:C.border}`,borderRadius:8,padding:14,position:"relative"}}>
+              {oi===1 && <div style={{position:"absolute",top:-8,right:12,background:C.orange,color:"#fff",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4}}>STANDARD</div>}
+              <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:8}}>{opt.label}</div>
+              <div style={{fontSize:11,color:C.gray,marginBottom:4}}>
+                Base: {fmtC(opt.ventBase)} {opt.adj!==0 && <span style={{color:opt.adj<0?C.green:C.orange}}>({opt.adj<0?"":"+"}{ (opt.adj*100).toFixed(0)}%)</span>}
+              </div>
+              <div style={{fontSize:11,color:C.gray,marginBottom:4}}>Adjusted: {fmtC(opt.adjusted)}</div>
+              {taxRate>0 && <div style={{fontSize:11,color:C.gray,marginBottom:4}}>Tax ({fmtPct(taxRate)}): {fmtC(opt.tax)}</div>}
+              {opt.achDiscount>0 && <div style={{fontSize:11,color:C.green,marginBottom:4}}>ACH Discount: -{fmtC(opt.achDiscount)}</div>}
+              <div style={{fontSize:15,fontWeight:800,color:C.navy,borderTop:`1px solid ${C.border}`,paddingTop:6,marginTop:4}}>
+                {fmtC(opt.total)}
+                {opt.achDiscount>0 && <span style={{fontSize:10,color:C.gray,fontWeight:400,marginLeft:4}}>w/ ACH</span>}
+              </div>
+              <div style={{marginTop:6}}>
+                {opt.payments.map((p,pi)=>(
+                  <div key={pi} style={{fontSize:11,color:C.gray,marginTop:2}}>{p.label}: {fmtC(p.amount)}</div>
+                ))}
+              </div>
+              {form.waiveScans && scanValue>0 && <div style={{fontSize:11,color:C.green,marginTop:4,fontStyle:"italic"}}>+ {fmtC(scanValue)} in scans included at no charge</div>}
+            </div>
+          ))}
         </div>
       </div>}
 
@@ -156,24 +252,24 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
         style={{border:`2px dashed ${ventMapFile?C.orange:C.border}`,borderRadius:8,padding:24,textAlign:"center",cursor:"pointer",background:ventMapFile?"#fef7ed":"#fff",transition:"all 0.2s"}}>
         <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&setVentMapFile(e.target.files[0])}/>
         {ventMapFile
-          ? <div><div style={{fontSize:13,fontWeight:600,color:C.orange}}>✓ {ventMapFile.name}</div><div style={{fontSize:12,color:C.gray,marginTop:4}}>Click or drop to replace</div></div>
-          : <div><div style={{fontSize:28,marginBottom:4}}>📎</div><div style={{fontSize:13,fontWeight:600,color:C.navy}}>Drop vent placement map here</div><div style={{fontSize:12,color:C.gray,marginTop:4}}>or click to browse (PNG, JPG)</div></div>}
+          ? <div><div style={{fontSize:13,fontWeight:600,color:C.orange}}>&#10003; {ventMapFile.name}</div><div style={{fontSize:12,color:C.gray,marginTop:4}}>Click or drop to replace</div></div>
+          : <div><div style={{fontSize:28,marginBottom:4}}>&#128206;</div><div style={{fontSize:13,fontWeight:600,color:C.navy}}>Drop vent placement map here</div><div style={{fontSize:12,color:C.gray,marginTop:4}}>or click to browse (PNG, JPG)</div></div>}
       </div>
     </div>
 
     <div style={{display:"flex",gap:12,marginTop:20}}>
-      <button onClick={onPDF} disabled={!ok||loading} style={{flex:1,padding:"14px 0",border:"none",borderRadius:8,background:ok&&!loading?C.navy:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:ok&&!loading?"pointer":"not-allowed",letterSpacing:0.5,transition:"all 0.2s"}}>
-        {loading==="pdf"?"Generating PDF...":"⬇ Download PDF"}
+      <button onClick={onPDF} disabled={!ok||loading} style={{flex:1,padding:"14px 0",border:"none",borderRadius:8,background:ok&&!loading?C.navy:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:ok&&!loading?"pointer":"not-allowed",letterSpacing:0.5}}>
+        {loading==="pdf"?"Generating...":"Download PDF"}
       </button>
-      <button onClick={onLink} disabled={!ok||loading} style={{flex:1,padding:"14px 0",border:"none",borderRadius:8,background:ok&&!loading?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:ok&&!loading?"pointer":"not-allowed",letterSpacing:0.5,transition:"all 0.2s"}}>
-        {loading==="link"?"Creating Link...":"🔗 Create Client Link"}
+      <button onClick={onLink} disabled={!ok||loading} style={{flex:1,padding:"14px 0",border:"none",borderRadius:8,background:ok&&!loading?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:ok&&!loading?"pointer":"not-allowed",letterSpacing:0.5}}>
+        {loading==="link"?"Creating...":"Create Client Link"}
       </button>
     </div>
 
     {result && <div style={{marginTop:16,padding:16,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8}}>
-      {result.type==="pdf" && <div style={{fontSize:14,color:"#15803d",fontWeight:600}}>✓ PDF downloaded successfully!</div>}
+      {result.type==="pdf" && <div style={{fontSize:14,color:"#15803d",fontWeight:600}}>&#10003; PDF downloaded successfully!</div>}
       {result.type==="link" && <div>
-        <div style={{fontSize:14,color:"#15803d",fontWeight:600,marginBottom:8}}>✓ Client proposal link created!</div>
+        <div style={{fontSize:14,color:"#15803d",fontWeight:600,marginBottom:8}}>&#10003; Client proposal link created!</div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <input readOnly value={`${window.location.origin}${result.clientUrl}`}
             style={{flex:1,padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,fontFamily:"monospace",color:C.dark,background:"#fff"}}
@@ -181,8 +277,8 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
           <button onClick={()=>navigator.clipboard.writeText(`${window.location.origin}${result.clientUrl}`)}
             style={{padding:"8px 16px",border:`1px solid ${C.border}`,borderRadius:6,background:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",color:C.navy,whiteSpace:"nowrap"}}>Copy</button>
         </div>
-        <div style={{fontSize:12,color:C.gray,marginTop:6}}>Share this link with your client. They can review and accept the proposal online.
-          <a href={result.clientUrl} target="_blank" rel="noopener" style={{color:C.orange,marginLeft:6,fontWeight:600}}>Preview →</a>
+        <div style={{fontSize:12,color:C.gray,marginTop:6}}>Share this link with your client.
+          <a href={result.clientUrl} target="_blank" rel="noopener" style={{color:C.orange,marginLeft:6,fontWeight:600}}>Preview &#8594;</a>
         </div>
       </div>}
     </div>}
@@ -193,20 +289,70 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
 function ClientView({form, ventMapUrl, proposalId, onBack}) {
   const [sigName,setSigName]=useState(""), [sigDate,setSigDate]=useState("");
   const [accepted,setAccepted]=useState(false), [submitting,setSubmitting]=useState(false);
+  const [selectedOption,setSelectedOption]=useState(null);
+  const [payingWith,setPayingWith]=useState("card");
+  const [checkoutLoading,setCheckoutLoading]=useState(false);
+  const [taxRate,setTaxRate]=useState(0);
+  const [paymentSuccess,setPaymentSuccess]=useState(false);
 
   const wetSF=parseFloat(form.wetSF)||0, rate=parseFloat(form.ratePSF)||0;
   const scanCost=parseFloat(form.scanCost)||0, numScans=parseInt(form.numScans)||0;
-  const ventTotal=wetSF*rate, scanTotal=scanCost*numScans, total=ventTotal+scanTotal;
-  const deposit=ventTotal*0.5, balance=ventTotal-deposit;
+  const ventTotal=wetSF*rate;
   const pn=propNum(form.proposalDate), vt=addDays(form.proposalDate,parseInt(form.validDays)||30);
   const addr=[form.projectAddress,[form.projectCity,form.projectState].filter(Boolean).join(", "),form.projectZip].filter(Boolean).join(", ");
   const interval=form.scanInterval||"3";
 
+  // Check for payment success in URL
+  useEffect(()=>{
+    const params = new URLSearchParams(window.location.search);
+    if(params.get("payment")==="success") setPaymentSuccess(true);
+  },[]);
+
+  // Lookup tax rate
+  useEffect(()=>{
+    const st = form.projectState?.toUpperCase().trim();
+    if(st && st.length===2){
+      fetch(`${API}/api/tax-rate?state=${st}`).then(r=>r.json()).then(d=>{
+        if(d.rate !== undefined) {
+          const override = parseFloat(form.taxRateOverride);
+          setTaxRate(!isNaN(override) ? override/100 : d.rate);
+        }
+      }).catch(()=>{});
+    }
+  },[form.projectState]);
+
+  const options = calcOptions(form, taxRate);
+
+  const doCheckout = async(optIndex, pmtIndex) => {
+    const opt = options[optIndex];
+    const pmt = opt.payments[pmtIndex];
+    const useAch = payingWith === "ach";
+    const amount = useAch ? pmt.amount : pmt.amountNoAch;
+    setCheckoutLoading(true);
+    try {
+      const r = await fetch(`${API}/api/create-checkout`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          proposalId, option: optIndex+1, paymentNumber: pmtIndex+1,
+          amountCents: Math.round(amount * 100),
+          description: `ReDry ${pmt.label} - ${form.projectName}`,
+          paymentMethod: useAch ? "ach" : "card",
+          clientCompany: form.clientCompany, projectName: form.projectName
+        })
+      });
+      const d = await r.json();
+      if(d.url) window.location.href = d.url;
+      else alert("Error creating checkout: " + (d.error||"Unknown"));
+    } catch(e) { alert("Payment error. Please try again."); }
+    setCheckoutLoading(false);
+  };
+
   const doAccept = async()=>{
-    if(!sigName||!sigDate)return;
+    if(!sigName||!sigDate||selectedOption===null)return;
     setSubmitting(true);
     try{
-      if(proposalId) await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:sigName,date:sigDate})});
+      if(proposalId) await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption+1})});
       setAccepted(true);
     }catch(e){setAccepted(true);}
     setSubmitting(false);
@@ -214,36 +360,52 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
 
   const SH=(n,t)=>(<div style={{marginTop:36,marginBottom:12}}><h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>{n}. {t}</h2><div style={{height:2,width:50,background:C.orange,marginTop:6}}/></div>);
   const P=({children})=>(<p style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"8px 0",textAlign:"justify"}}>{children}</p>);
-  const B=({html})=>(<div style={{display:"flex",gap:10,marginBottom:6,fontSize:14,lineHeight:1.65,color:"#374151"}}><span style={{color:C.orange,fontWeight:700,flexShrink:0}}>•</span><span dangerouslySetInnerHTML={{__html:html}}/></div>);
+  const B=({html})=>(<div style={{display:"flex",gap:10,marginBottom:6,fontSize:14,lineHeight:1.65,color:"#374151"}}><span style={{color:C.orange,fontWeight:700,flexShrink:0}}>&#8226;</span><span dangerouslySetInnerHTML={{__html:html}}/></div>);
   const Sub=({t})=>(<h3 style={{fontSize:14,fontWeight:700,color:C.navy,margin:"16px 0 8px"}}>{t}</h3>);
 
   if(accepted) return (
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{textAlign:"center",maxWidth:500,padding:40}}>
-        <div style={{width:72,height:72,borderRadius:"50%",background:"#dcfce7",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",fontSize:32}}>✓</div>
+      <div style={{textAlign:"center",maxWidth:540,padding:40}}>
+        <div style={{width:72,height:72,borderRadius:"50%",background:"#dcfce7",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",fontSize:32}}>&#10003;</div>
         <h1 style={{fontSize:26,fontWeight:800,color:C.navy,fontFamily:"'Playfair Display',serif",marginBottom:8}}>Proposal Accepted</h1>
         <p style={{color:C.gray,fontSize:15,lineHeight:1.6}}>Thank you. Your signed acceptance has been recorded. The ReDry team will be in touch to coordinate next steps.</p>
         <div style={{marginTop:24,padding:16,background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,color:C.gray}}>
           <div>Signed by: <strong style={{color:C.dark}}>{sigName}</strong></div>
           <div>Date: <strong style={{color:C.dark}}>{sigDate}</strong></div>
-          <div>Proposal: <strong style={{color:C.dark}}>{pn}</strong></div>
+          <div>Selected: <strong style={{color:C.dark}}>Option {selectedOption+1}</strong></div>
         </div>
-        {proposalId && <a href={`${API}/api/proposal/${proposalId}/pdf`} target="_blank" rel="noopener" style={{display:"inline-block",marginTop:16,padding:"10px 24px",background:C.navy,color:"#fff",borderRadius:6,fontSize:13,fontWeight:600,textDecoration:"none"}}>Download PDF Copy</a>}
-        {onBack && <button onClick={onBack} style={{display:"block",margin:"12px auto 0",padding:"10px 24px",border:`1px solid ${C.border}`,borderRadius:6,background:"#fff",color:C.navy,fontSize:13,fontWeight:600,cursor:"pointer"}}>← Back to Builder</button>}
+        {selectedOption!==null && <div style={{marginTop:20}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:12}}>Pay Your Deposit</div>
+          <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:12}}>
+            <button onClick={()=>setPayingWith("card")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
+            <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+              ACH / Bank Transfer {options[selectedOption].achDiscount>0 && "(Save $100)"}
+            </button>
+          </div>
+          <button onClick={()=>doCheckout(selectedOption, 0)} disabled={checkoutLoading}
+            style={{padding:"14px 32px",border:"none",borderRadius:8,background:C.orange,color:"#fff",fontSize:15,fontWeight:700,cursor:checkoutLoading?"wait":"pointer"}}>
+            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? options[selectedOption].payments[0].amount : options[selectedOption].payments[0].amountNoAch)} Deposit`}
+          </button>
+        </div>}
       </div>
     </div>
   );
 
   return (<div style={{minHeight:"100vh",background:C.bg}}>
+    {/* Top bar */}
     <div style={{background:C.navy,padding:"10px 0"}}>
       <div style={{maxWidth:820,margin:"0 auto",padding:"0 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span style={{color:"#fff",fontSize:13,fontWeight:600,letterSpacing:1}}>RE<span style={{color:C.orange}}>DRY</span></span>
         <div style={{display:"flex",gap:8}}>
-          {proposalId && <a href={`${API}/api/proposal/${proposalId}/pdf`} target="_blank" rel="noopener" style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",padding:"5px 14px",borderRadius:4,fontSize:12,textDecoration:"none"}}>⬇ PDF</a>}
-          {onBack && <button onClick={onBack} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",padding:"5px 14px",borderRadius:4,fontSize:12,cursor:"pointer"}}>← Builder</button>}
+          {proposalId && <a href={`${API}/api/proposal/${proposalId}/pdf`} target="_blank" rel="noopener" style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",padding:"5px 14px",borderRadius:4,fontSize:12,textDecoration:"none"}}>PDF</a>}
         </div>
       </div>
     </div>
+
+    {paymentSuccess && <div style={{background:"#f0fdf4",borderBottom:"1px solid #bbf7d0",padding:"12px 20px",textAlign:"center"}}>
+      <span style={{color:"#15803d",fontWeight:600,fontSize:14}}>&#10003; Payment received! Thank you.</span>
+    </div>}
+
     <div style={{maxWidth:820,margin:"0 auto",padding:"32px 20px 60px"}}>
       {/* Header */}
       <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden",marginBottom:24}}>
@@ -266,7 +428,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
             <div style={{flex:1,minWidth:200}}>
               <div style={{fontSize:10,fontWeight:700,color:C.orange,letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>To</div>
               <div style={{fontSize:14,color:C.dark,lineHeight:1.7}}>
-                <strong>{form.clientCompany||"—"}</strong>
+                <strong>{form.clientCompany||"\u2014"}</strong>
                 {form.clientContact && <><br/>{form.clientContact}</>}
                 {form.clientTitle && <><br/>{form.clientTitle}</>}
                 {form.clientPhone && <><br/>{form.clientPhone}</>}
@@ -281,75 +443,93 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
       <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
         {SH(1,"Project Overview")}
         <P>ReDry, LLC is the manufacturer and lessor of the ReDry 2-Way Vent System, a proprietary solar-powered drying system designed to remove trapped moisture from commercial roof insulation without membrane removal or tear-off. This proposal covers the lease of the ReDry Vent System and associated performance monitoring services for the {form.projectSection||"designated area"} of {form.projectName}, located at {addr}.</P>
-        <P>A Roof MRI moisture survey identified approximately <strong>{fmtN(wetSF)} square feet</strong> of wet insulation within the project area. ReDry has engineered a vent Placement Map specific to this section based on the survey data{form.totalVents?<>, calling for an estimated <strong>{form.totalVents} vents</strong></>:""}. The Placement Map defines the exact quantity and positioning of all vents and is provided to the roofing contractor prior to installation.</P>
-        <P>The roofing contractor is responsible for installing the 2-Way Vents per the ReDry Installation Specification. Following installation, ReDry will attach its proprietary ReDry Vent heads to the installed 2-Way Vents, confirm proper placement, and conduct periodic moisture scans to monitor drying progress and verify system performance.</P>
+        <P>A Roof MRI moisture survey identified approximately <strong>{fmtN(wetSF)} square feet</strong> of wet insulation within the project area. ReDry has engineered a vent Placement Map specific to this section based on the survey data{form.totalVents?<>, calling for an estimated <strong>{form.totalVents} vents</strong></>:""}.</P>
+        <P>The roofing contractor is responsible for installing the 2-Way Vents per the ReDry Installation Specification. Following installation, ReDry will attach its proprietary ReDry Vent heads, confirm proper placement, and conduct periodic moisture scans to monitor drying progress.</P>
 
         {SH(2,"Scope of Work")}
         <Sub t="2.1 Vent System Furnishing and Commissioning"/>
         <B html="ReDry will furnish all ReDry 2-Way Vents and ReDry Vent heads per the engineered Placement Map."/>
         <B html="ReDry will provide the Installation Specification (SPEC-VENT-2026-01, Rev. A) and Placement Map to the roofing contractor."/>
-        <B html="The <strong>roofing contractor</strong> is solely responsible for installing and bonding the 2-Way Vents to the roof membrane per the Installation Specification. ReDry is not responsible for the attachment of the 2-Way Vents to the roof surface."/>
-        <B html="Following 2-Way Vent installation, ReDry will attach the proprietary ReDry Vent heads to each installed 2-Way Vent and confirm that all vents are properly positioned over the cored holes per the Placement Map."/>
+        <B html="The <strong>roofing contractor</strong> is solely responsible for installing and bonding the 2-Way Vents to the roof membrane per the Installation Specification."/>
+        <B html="Following installation, ReDry will attach the proprietary ReDry Vent heads and confirm proper positioning."/>
         <B html="ReDry will complete photo documentation per specification requirements for warranty activation."/>
 
         <Sub t="2.2 Moisture Monitoring Program"/>
         <B html={`ReDry will perform <strong>${numScans} (${numWord(numScans)}) moisture scans</strong> at approximately <strong>${interval}-month intervals</strong> following installation.`}/>
-        <B html="Each scan includes a full moisture survey of the treated area using Roof MRI technology and a written report documenting moisture levels and drying progress."/>
-        <B html="Scan reports will be delivered to the client within a reasonable timeframe following each survey."/>
+        <B html="Each scan includes a full moisture survey using Roof MRI technology and a written report documenting moisture levels and drying progress."/>
         <B html={`A minimum of ${numScans} scans is required under this agreement regardless of drying timeline.`}/>
 
         <Sub t="2.3 Vent Retrieval and Performance Criteria"/>
-        <P>The ReDry Vents remain the property of ReDry, LLC throughout the lease period. ReDry will retrieve the vent heads once the insulation in the area served by each vent is confirmed to have reached an acceptable moisture reading as measured by the Roof MRI PHD (Precise Hydrology Detection) scale.</P>
+        <P>The ReDry Vents remain the property of ReDry, LLC throughout the lease period. Vents will be retrieved once insulation reaches acceptable moisture readings on the Roof MRI PHD scale.</P>
         <PHDTable compact/>
-        <div style={{marginTop:10}}/>
-        <P>Vents serving areas that have reached the "Dry" threshold on the applicable PHD setting will be retrieved by ReDry at the next scheduled site visit. Vents serving areas that remain in the "Damp" or "Saturated" range will remain in place and continue operating until acceptable readings are achieved.</P>
 
         <Sub t="2.4 Exclusions"/>
-        <B html="Installation and adhesive bonding of the 2-Way Vents to the roof membrane (by roofing contractor)."/>
-        <B html="Coring of the roof membrane and insulation (by roofing contractor per ReDry Installation Specification)."/>
+        <B html="Installation and adhesive bonding of 2-Way Vents to the roof membrane (by roofing contractor)."/>
+        <B html="Coring of roof membrane and insulation (by roofing contractor per ReDry spec)."/>
         <B html="Roof membrane repair, replacement, or coating (by others)."/>
         <B html="Structural deck repair or modification."/>
-        <B html="Access provisions, barricading, or traffic control (by others unless otherwise agreed)."/>
         <B html={`Any work beyond the ${form.projectSection||"designated"} boundary identified on the Placement Map.`}/>
 
-        {SH(3,"Pricing")}
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:14,marginTop:12}}>
-          <thead><tr>{["Description","Quantity","Unit Rate","Total"].map((h,i)=>
-            <th key={h} style={{background:C.navy,color:"#fff",padding:"10px 14px",textAlign:i>1?"right":"left",fontWeight:600,fontSize:13}}>{h}</th>
-          )}</tr></thead>
-          <tbody>
-            <tr style={{background:"#f1f5f9"}}><td style={{padding:"10px 14px"}}>ReDry 2-Way Vent System Lease and Commissioning</td><td style={{padding:"10px 14px"}}>{fmtN(wetSF)} SF</td><td style={{padding:"10px 14px",textAlign:"right"}}>{fmtC(rate)} / SF</td><td style={{padding:"10px 14px",textAlign:"right",fontWeight:600}}>{fmtC(ventTotal)}</td></tr>
-            <tr><td style={{padding:"10px 14px"}}>Moisture Monitoring Scan</td><td style={{padding:"10px 14px"}}>{numScans} scans</td><td style={{padding:"10px 14px",textAlign:"right"}}>{fmtC(scanCost)} / scan</td><td style={{padding:"10px 14px",textAlign:"right",fontWeight:600}}>{fmtC(scanTotal)}</td></tr>
-            <tr style={{borderTop:`2px solid ${C.navy}`,background:"#f1f5f9"}}><td colSpan={2}/><td style={{padding:"12px 14px",textAlign:"right",fontWeight:800,color:C.navy}}>CONTRACT TOTAL</td><td style={{padding:"12px 14px",textAlign:"right",fontWeight:800,color:C.navy,fontSize:16}}>{fmtC(total)}</td></tr>
-          </tbody>
-        </table>
+        {SH(3,"Pricing and Payment Options")}
+        <P>The vent system lease is based on <strong>{fmtN(wetSF)} square feet</strong> of identified wet insulation at <strong>{fmtC(rate)} per square foot</strong> (base: {fmtC(ventTotal)}). Applicable rental tax for {form.projectState||"the project state"} is included. Three payment options are available:</P>
 
-        {SH(4,"Payment Terms")}
-        <Sub t="4.1 Vent System Lease and Commissioning"/>
-        <P>A deposit of <strong>fifty percent (50%)</strong> of the Vent System Lease and Commissioning total ({fmtC(deposit)}) is due upon execution of this agreement. The remaining <strong>fifty percent (50%)</strong> ({fmtC(balance)}) is due within <strong>thirty (30) days</strong> of completed installation.</P>
-        <Sub t="4.2 Moisture Monitoring Scans"/>
-        <P>Each moisture scan ({fmtC(scanCost)} per scan) shall be invoiced individually upon delivery of the scan report. Payment is due within <strong>fifteen (15) days</strong> of receipt of the report. All {numScans} scans are guaranteed under this agreement and are non-cancelable.</P>
+        {/* 3 Option Cards */}
+        <div style={{display:"flex",gap:16,marginTop:16,flexWrap:"wrap"}}>
+          {options.map((opt,oi)=>{
+            const sel = selectedOption===oi;
+            return (
+            <div key={oi} onClick={()=>setSelectedOption(oi)} style={{flex:"1 1 240px",background:sel?"#fef7ed":"#fff",border:`2px solid ${sel?C.orange:C.border}`,borderRadius:10,padding:18,cursor:"pointer",position:"relative",transition:"all 0.2s"}}>
+              {oi===1 && <div style={{position:"absolute",top:-10,right:12,background:C.navy,color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:4}}>STANDARD</div>}
+              {oi===0 && <div style={{position:"absolute",top:-10,right:12,background:C.green,color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:4}}>BEST VALUE</div>}
+              <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:10}}>{opt.label}</div>
 
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginTop:12}}>
-          <thead><tr>{["Payment","Amount","Due"].map((h,i)=><th key={h} style={{background:C.navy,color:"#fff",padding:"8px 14px",textAlign:i===1?"right":"left",fontWeight:600}}>{h}</th>)}</tr></thead>
-          <tbody>{[
-            ["Deposit (50% of Vent System Lease)",fmtC(deposit),"Upon contract execution"],
-            ["Balance (50% of Vent System Lease)",fmtC(balance),"Net 30 from installation completion"],
-            ...Array.from({length:numScans},(_,i)=>[`Moisture Scan ${i+1} of ${numScans}`,fmtC(scanCost),"Net 15 from report delivery"])
-          ].map((r,i)=><tr key={i} style={{background:i%2===0?"#f1f5f9":"#fff"}}><td style={{padding:"8px 14px"}}>{r[0]}</td><td style={{padding:"8px 14px",textAlign:"right",fontWeight:600}}>{r[1]}</td><td style={{padding:"8px 14px"}}>{r[2]}</td></tr>)}</tbody>
-        </table>
+              <div style={{fontSize:12,color:C.gray,marginBottom:3}}>Vent Lease: {fmtC(ventTotal)}</div>
+              {opt.adj!==0 && <div style={{fontSize:12,color:opt.adj<0?C.green:C.orange,marginBottom:3}}>
+                {opt.adj<0?"Discount":"Adjustment"}: {opt.adj<0?"":"+"}{ (opt.adj*100).toFixed(0)}% ({fmtC(opt.adjusted - ventTotal)})
+              </div>}
+              {taxRate>0 && <div style={{fontSize:12,color:C.gray,marginBottom:3}}>Tax ({fmtPct(taxRate)}): {fmtC(opt.tax)}</div>}
+              {opt.achDiscount>0 && <div style={{fontSize:12,color:C.green,marginBottom:3}}>ACH Discount: -{fmtC(opt.achDiscount)}</div>}
 
-        {SH(5,"General Conditions")}
+              <div style={{borderTop:`2px solid ${C.navy}`,paddingTop:8,marginTop:8}}>
+                <div style={{fontSize:18,fontWeight:800,color:C.navy}}>{fmtC(opt.total)}</div>
+                {opt.achDiscount>0 && <div style={{fontSize:11,color:C.gray}}>({fmtC(opt.totalNoAch)} without ACH)</div>}
+              </div>
+
+              <div style={{marginTop:10}}>
+                {opt.payments.map((p,pi)=>(
+                  <div key={pi} style={{background:"#f8fafc",borderRadius:6,padding:"8px 10px",marginTop:4,fontSize:12}}>
+                    <div style={{display:"flex",justifyContent:"space-between"}}>
+                      <strong style={{color:C.navy}}>{p.label}</strong>
+                      <strong style={{color:C.navy}}>{fmtC(p.amount)}</strong>
+                    </div>
+                    <div style={{color:C.gray,marginTop:2}}>{p.due}</div>
+                  </div>
+                ))}
+              </div>
+
+              {form.waiveScans && opt.scanValue>0 && <div style={{marginTop:8,padding:"6px 10px",background:"#f0fdf4",borderRadius:6,fontSize:12,color:C.green}}>
+                <strong>Included at no charge:</strong> {numScans} moisture scans ({fmtC(opt.scanValue)} value)
+              </div>}
+
+              {!form.waiveScans && <div style={{marginTop:8,fontSize:11,color:C.gray,fontStyle:"italic"}}>
+                + {numScans} scans invoiced separately ({fmtC(scanCost)}/scan)
+              </div>}
+
+              {sel && <div style={{marginTop:8,textAlign:"center"}}><span style={{display:"inline-block",background:C.orange,color:"#fff",padding:"4px 12px",borderRadius:4,fontSize:11,fontWeight:700}}>SELECTED</span></div>}
+            </div>
+          );})}
+        </div>
+
+        {SH(4,"General Conditions")}
         {[
-          ["5.1 Relationship of Parties","ReDry is the manufacturer and lessor of the ReDry Vent System and is not a roofing contractor or subcontractor. ReDry's role is limited to furnishing the vent system, engineering the Placement Map, attaching the ReDry Vent heads, confirming vent placement, and providing ongoing moisture monitoring services."],
-          ["5.2 Roofing Contractor Responsibilities","The roofing contractor engaged by the client or general contractor is solely responsible for installing and bonding the 2-Way Vents to the roof membrane in accordance with the ReDry Installation Specification (SPEC-VENT-2026-01, Rev. A). This includes all coring, adhesive application, membrane flash-in, and related roofing work. ReDry assumes no liability for the quality or workmanship of the roofing contractor's installation."],
-          ["5.3 Installation Specification","All 2-Way Vent installation work shall be performed by the roofing contractor in accordance with ReDry Vent System Installation Specification SPEC-VENT-2026-01 (Rev. A). A copy of the specification will be provided to the roofing contractor and is incorporated herein by reference."],
-          ["5.4 Placement Map","The ReDry Placement Map is a controlled engineering document generated from project-specific moisture survey data. The Placement Map shall not be modified by the roofing contractor or any other party without prior written authorization from ReDry."],
-          ["5.5 Warranty","System warranty activation requires complete photo documentation, a passed QC inspection per the installation specification, and installation by a qualified roofing contractor. Warranty terms and coverage details are provided under separate cover upon request."],
-          ["5.6 Equipment Ownership and Retrieval",'All ReDry Vent heads furnished under this agreement remain the sole property of ReDry, LLC throughout the lease period. The client shall not remove, relocate, or tamper with the ReDry Vents without prior written authorization. ReDry will retrieve the vent heads once the served area reaches an acceptable "Dry" reading on the PHD scale as described in Section 2.3. Upon retrieval, the roofing contractor or client is responsible for sealing the remaining 2-Way Vent penetrations per standard roofing practice.'],
-          ["5.7 Access and Coordination","The client or general contractor shall provide safe, unobstructed access to the roof area during ReDry's commissioning visit and each scheduled moisture scan. Scheduling will be coordinated with the client to minimize disruption to building operations."],
-          ["5.8 Weather Delays","Installation of 2-Way Vents by the roofing contractor requires dry conditions per adhesive manufacturer specifications. ReDry's commissioning visit will be scheduled following completion of the contractor's installation. In the event of weather delays, the project schedule will be adjusted accordingly at no additional cost."],
-          ["5.9 Proposal Validity",`This proposal is valid for thirty (30) days from the date of issue (${vt}). Pricing is subject to revision after that date.`],
+          ["4.1 Relationship of Parties","ReDry is the manufacturer and lessor of the ReDry Vent System and is not a roofing contractor or subcontractor."],
+          ["4.2 Roofing Contractor Responsibilities","The roofing contractor is solely responsible for installing and bonding the 2-Way Vents per the ReDry Installation Specification."],
+          ["4.3 Installation Specification","All work shall be performed per ReDry Vent System Installation Specification SPEC-VENT-2026-01 (Rev. A)."],
+          ["4.4 Placement Map","The ReDry Placement Map is a controlled engineering document and shall not be modified without written authorization from ReDry."],
+          ["4.5 Warranty","System warranty activation requires complete photo documentation, passed QC inspection, and installation by a qualified roofing contractor."],
+          ["4.6 Equipment Ownership","All ReDry Vent heads remain the sole property of ReDry, LLC throughout the lease period."],
+          ["4.7 Access","The client shall provide safe, unobstructed access to the roof area during commissioning and each scheduled scan."],
+          ["4.8 Proposal Validity",`This proposal is valid for thirty (30) days from date of issue (${vt}).`],
         ].map(([t,x])=><p key={t} style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"10px 0",textAlign:"justify"}}><strong style={{color:C.navy}}>{t}.</strong>&nbsp;&nbsp;{x}</p>)}
       </div>
 
@@ -357,29 +537,45 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
       {ventMapUrl && <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
         <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Exhibit A: Vent Placement Map</h2>
         <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
-        <div style={{fontSize:14,color:C.gray,marginBottom:12}}>{form.projectName} | {addr} | {form.projectSection}</div>
         <img src={ventMapUrl} alt="Vent Placement Map" style={{width:"100%",borderRadius:8,border:`1px solid ${C.border}`}}/>
-        <div style={{fontSize:12,color:C.gray,marginTop:8}}>Heat map color key: Green = dry, Yellow = moderate moisture, Orange = elevated moisture, Red = saturated.</div>
       </div>}
 
-      {/* Acceptance */}
+      {/* Acceptance & Payment */}
       <div style={{background:"#fff",borderRadius:12,border:`2px solid ${C.orange}`,padding:"28px 32px"}}>
-        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Acceptance</h2>
+        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Acceptance and Payment</h2>
         <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
-        <P>By signing below, the authorized representative of the client accepts this proposal and the terms described herein. This document constitutes a binding agreement between the parties upon execution.</P>
-        <div style={{display:"flex",gap:16,marginTop:20,flexWrap:"wrap"}}>
-          <div style={{flex:1,minWidth:200}}>
-            <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Full Name / Title</label>
-            <input value={sigName} onChange={e=>setSigName(e.target.value)} placeholder="Jane Smith, VP of Operations" style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
+
+        {selectedOption===null && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:16}}>
+          <div style={{fontSize:14,fontWeight:600,color:C.orange}}>Please select a payment option above to continue.</div>
+        </div>}
+
+        {selectedOption!==null && <>
+          <P>By signing below, you accept this proposal under <strong>{options[selectedOption].label}</strong> and the terms described herein.</P>
+
+          <div style={{display:"flex",gap:16,marginTop:20,flexWrap:"wrap"}}>
+            <div style={{flex:1,minWidth:200}}>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Full Name / Title</label>
+              <input value={sigName} onChange={e=>setSigName(e.target.value)} placeholder="Jane Smith, VP of Operations" style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
+            </div>
+            <div style={{flex:1,minWidth:200}}>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Date</label>
+              <input type="date" value={sigDate} onChange={e=>setSigDate(e.target.value)} style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
+            </div>
           </div>
-          <div style={{flex:1,minWidth:200}}>
-            <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Date</label>
-            <input type="date" value={sigDate} onChange={e=>setSigDate(e.target.value)} style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
+
+          {/* Payment method toggle */}
+          <div style={{marginTop:16,display:"flex",gap:8,alignItems:"center"}}>
+            <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Payment method:</span>
+            <button onClick={()=>setPayingWith("card")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
+            <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+              ACH / Bank Transfer {options[selectedOption].achDiscount>0 ? "(Save $100)" : ""}
+            </button>
           </div>
-        </div>
-        <button onClick={doAccept} disabled={!sigName||!sigDate||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&!submitting?"pointer":"not-allowed"}}>
-          {submitting?"Submitting...":"Accept Proposal"}
-        </button>
+
+          <button onClick={doAccept} disabled={!sigName||!sigDate||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&!submitting?"pointer":"not-allowed"}}>
+            {submitting?"Submitting...":"Accept Proposal and Pay Deposit"}
+          </button>
+        </>}
       </div>
     </div>
   </div>);
@@ -394,8 +590,8 @@ function App() {
   const [loading,setLoading] = useState(null);
   const [result,setResult] = useState(null);
   const [proposalId,setProposalId] = useState(null);
+  const [taxRate,setTaxRate] = useState(0);
 
-  // Check if this is a client proposal URL
   useEffect(()=>{
     const path = window.location.pathname;
     const match = path.match(/^\/proposal\/([a-f0-9]+)$/);
@@ -428,7 +624,7 @@ function App() {
       const b=await r.blob(),u=URL.createObjectURL(b),a=document.createElement("a");
       a.href=u;a.download=`ReDry_Proposal_${form.projectName.replace(/\s+/g,"_")}_${form.projectSection.replace(/\s+/g,"_")}.pdf`;
       a.click();URL.revokeObjectURL(u);setResult({type:"pdf"});
-    }catch(e){alert("Failed to generate PDF. Make sure the server is running.");}
+    }catch(e){alert("Failed to generate PDF.");}
     setLoading(null);
   };
 
@@ -438,13 +634,13 @@ function App() {
       const r=await fetch(`${API}/api/generate-proposal-link`,{method:"POST",body:buildFD()});
       if(!r.ok)throw new Error("fail");
       const d=await r.json();setResult({type:"link",...d});setProposalId(d.proposalId);
-    }catch(e){alert("Failed to create link. Make sure the server is running.");}
+    }catch(e){alert("Failed to create link.");}
     setLoading(null);
   };
 
   if(view==="loading") return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.gray}}>Loading...</div>;
   if(view==="client") return <ClientView form={form} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
-  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result}/></div>);
+  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} taxRate={taxRate} setTaxRate={setTaxRate}/></div>);
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
