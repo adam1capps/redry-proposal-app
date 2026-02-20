@@ -407,6 +407,31 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
         <div style={{fontSize:12,color:C.gray,marginTop:6}}>Share this link with your client.
           <a href={result.clientUrl} target="_blank" rel="noopener" style={{color:C.orange,marginLeft:6,fontWeight:600}}>Preview &#8594;</a>
         </div>
+
+        {/* Send to Client via Email */}
+        <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
+          {!result.emailSent ? (<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <input value={result.sendEmail||form.clientEmail||""} onChange={e=>setResult(r=>({...r,sendEmail:e.target.value}))}
+              placeholder="client@company.com" type="email"
+              style={{flex:"1 1 200px",padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,color:C.dark,background:"#fff",outline:"none"}}/>
+            <button onClick={async()=>{
+              const email = result.sendEmail||form.clientEmail;
+              if(!email){alert("Enter an email address"); return;}
+              setResult(r=>({...r,sending:true}));
+              try{
+                const res = await fetch(`${API}/api/proposal/${result.proposalId}/send`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+                const d = await res.json();
+                if(d.sent) setResult(r=>({...r,emailSent:true,sending:false,sentTo:email}));
+                else {alert("Failed to send: "+(d.error||"Unknown error")); setResult(r=>({...r,sending:false}));}
+              }catch(e){alert("Error sending email"); setResult(r=>({...r,sending:false}));}
+            }} disabled={result.sending}
+              style={{padding:"8px 20px",border:"none",borderRadius:6,background:result.sending?"#cbd5e1":C.orange,color:"#fff",fontSize:13,fontWeight:700,cursor:result.sending?"wait":"pointer",whiteSpace:"nowrap"}}>
+              {result.sending?"Sending...":"Send to Client"}
+            </button>
+          </div>) : (
+            <div style={{fontSize:13,color:"#15803d",fontWeight:600}}>&#10003; Proposal emailed to {result.sentTo}</div>
+          )}
+        </div>
       </div>}
     </div>}
   </div>);
