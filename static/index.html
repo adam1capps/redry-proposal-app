@@ -431,7 +431,21 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
 
   useEffect(()=>{
     const params = new URLSearchParams(window.location.search);
-    if(params.get("payment")==="success") setPaymentSuccess(true);
+    if(params.get("payment")==="success") {
+      setPaymentSuccess(true);
+      const opt = parseInt(params.get("option"))||1;
+      const pmt = parseInt(params.get("pmt"))||1;
+      const amt = parseInt(params.get("amt"))||0;
+      const method = params.get("method")||"card";
+      if(proposalId) {
+        fetch(`${API}/api/proposal/${proposalId}/payment-confirm`, {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({option:opt, paymentNumber:pmt, amount:amt, method:method})
+        }).catch(()=>{});
+      }
+      // Clean URL params
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   },[]);
 
   useEffect(()=>{
