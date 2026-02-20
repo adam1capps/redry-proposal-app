@@ -739,34 +739,32 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
     if proposal_id:
         proposal_url = f"https://redry-proposal-app.onrender.com/proposal/{proposal_id}"
         
-        # Styled CTA box
-        cta_style = ParagraphStyle('CTAText', parent=style_body, fontSize=11, leading=15, 
-                                    textColor=NAVY, alignment=TA_CENTER, spaceAfter=0)
-        cta_link_style = ParagraphStyle('CTALink', parent=style_body, fontSize=12, leading=16,
-                                         textColor=ORANGE, fontName='Helvetica-Bold', alignment=TA_CENTER, spaceAfter=0)
-        cta_small = ParagraphStyle('CTASmall', parent=style_small, alignment=TA_CENTER, fontSize=8, spaceAfter=0)
+        # Clean CTA with orange button
+        cta_small = ParagraphStyle('CTASmall', parent=style_small, alignment=TA_CENTER, fontSize=9, spaceAfter=0, textColor=MED_GRAY)
+        btn_text = ParagraphStyle('BtnText', fontName='Helvetica-Bold', fontSize=14, leading=18,
+                                   textColor=WHITE, alignment=TA_CENTER, spaceAfter=0)
         
-        cta_data = [[
-            [Paragraph("ACCEPT THIS PROPOSAL ONLINE", ParagraphStyle('CTAHead', parent=style_body, 
-                        fontSize=13, fontName='Helvetica-Bold', textColor=NAVY, alignment=TA_CENTER, spaceAfter=6)),
-             Paragraph("Review, sign, and select your payment option at:", cta_style),
-             Spacer(1, 6),
-             Paragraph(f'<a href="{proposal_url}" color="#E8943A">{proposal_url}</a>', cta_link_style),
-             Spacer(1, 8),
-             Paragraph(f"This proposal is valid through {valid_through}.", cta_small),
-            ]
-        ]]
-        cta_table = Table(cta_data, colWidths=[usable_width - 24])
-        cta_table.setStyle(TableStyle([
-            ('BOX', (0, 0), (-1, -1), 2, ORANGE),
-            ('BACKGROUND', (0, 0), (-1, -1), HexColor("#FFF9F3")),
-            ('TOPPADDING', (0, 0), (-1, -1), 16),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 16),
-            ('LEFTPADDING', (0, 0), (-1, -1), 12),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        story.append(Spacer(1, 4))
+        story.append(Paragraph("To accept this proposal, review your options and sign electronically:", cta_small))
+        story.append(Spacer(1, 8))
+        
+        # Orange button
+        btn_data = [[Paragraph(f'<a href="{proposal_url}" color="#FFFFFF">ACCEPT THIS PROPOSAL</a>', btn_text)]]
+        btn_table = Table(btn_data, colWidths=[usable_width * 0.55])
+        btn_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), ORANGE),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 14),
+            ('ROUNDEDCORNERS', [8, 8, 8, 8]),
         ]))
-        story.append(cta_table)
+        # Center the button with an outer table
+        outer = Table([[btn_table]], colWidths=[usable_width])
+        outer.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
+        story.append(outer)
+        
+        story.append(Spacer(1, 8))
+        story.append(Paragraph(f"This proposal is valid through {valid_through}.", cta_small))
     else:
         story.append(Paragraph(
             "A secure online link will be provided for proposal acceptance and payment.",
