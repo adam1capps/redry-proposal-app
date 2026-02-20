@@ -254,6 +254,56 @@ def send_proposal(pid):
     pdf_bytes = None
     if os.path.exists(pdf_path):
         with open(pdf_path, "rb") as f: pdf_bytes = f.read()
+
+    # Calculate pricing for email summary
+    wet_sf = float(cfg.get("wetSF", 0) or 0)
+    rate = float(cfg.get("ratePSF", 2.0) or 2.0)
+    vent_total = wet_sf * rate
+    tax_rate_val = float(cfg.get("taxRateOverride", "") or cfg.get("taxRate", "") or 0)
+    tax_amount = round(vent_total * tax_rate_val, 2)
+    subtotal = round(vent_total + tax_amount, 2)
+    scan_cost = float(cfg.get("scanCost", 4500) or 4500)
+    num_scans = int(cfg.get("numScans", 4) or 4)
+    waive_scans = cfg.get("waiveScans", False)
+    total_scans = 0 if waive_scans else round(scan_cost * num_scans, 2)
+    grand_total = round(subtotal + total_scans, 2)
+    total_vents = cfg.get("totalVents", "")
+    scan_interval = cfg.get("scanInterval", "3")
+
+    # Payment option visibility
+    show_pay_full = cfg.get("showOption0", False)
+    show_5050 = cfg.get("showOption1", True)
+    show_easy = cfg.get("showOption2", False)
+
+    # Format helpers
+    def fc(v): return f"${v:,.2f}"
+
+    # 50/50 deposit
+    deposit_50 = round(grand_total / 2, 2)
+
+    # Build scan line
+    scan_line = ""
+    if not waive_scans:
+        scan_line = f"""<tr><td style="padding:6px 12px;font-size:13px;color:#374151">Moisture Monitoring ({num_scans} scans)</td><td style="padding:6px 12px;font-size:13px;color:#374151;text-align:right">{fc(total_scans)}</td></tr>"""
+
+    # Build payment teaser
+    payment_teaser = ""
+    teasers = []
+    if show_pay_full:
+        discount_total = round(grand_total * 0.97, 2)
+        teasers.append(f'<strong>Pay in Full</strong> and save 3% ({fc(discount_total)})')
+    if show_easy:
+        easy_start = round(grand_total * 1.03 * 0.10, 2)
+        teasers.append(f'<strong>Get started for just {fc(easy_start)}</strong> with our Easy Start plan')
+    if teasers:
+        teaser_items = "".join(f'<li style="margin-bottom:4px">{t}</li>' for t in teasers)
+        payment_teaser = f"""
+        <div style="margin-top:16px;padding:14px 16px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px">
+          <p style="font-size:13px;color:#9A3412;font-weight:700;margin:0 0 6px 0">Additional payment options available:</p>
+          <ul style="font-size:13px;color:#374151;margin:0;padding-left:20px;line-height:1.7">{teaser_items}</ul>
+          <p style="font-size:12px;color:#9A3412;margin:8px 0 0 0">View the full proposal to see all options.</p>
+        </div>"""
+
     subject = f"ReDry Proposal: {project}{f' - {section}' if section else ''}"
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
@@ -262,11 +312,35 @@ def send_proposal(pid):
       </div>
       <div style="padding:28px;background:#fff;border:1px solid #e2e8f0">
         <p style="font-size:15px;line-height:1.7;color:#374151">{f'Hi {contact},' if contact else 'Hello,'}</p>
-        <p style="font-size:14px;line-height:1.7;color:#374151">Please find attached your ReDry vent system lease proposal for <strong>{project}</strong>{f' ({section})' if section else ''}. You can also view and accept the proposal online using the link below.</p>
+        <p style="font-size:14px;line-height:1.7;color:#374151">Thank you for the opportunity to work with {company} on <strong>{project}</strong>{f' ({section})' if section else ''}. We appreciate your trust in ReDry to solve the moisture challenges on this roof.</p>
+        <p style="font-size:14px;line-height:1.7;color:#374151">Please find your proposal attached and summarized below. You can also review the full details, select your payment option, and accept the proposal online.</p>
+
+        <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
+          <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Project Summary</p>
+          <table style="width:100%;border-collapse:collapse">
+            <tr><td style="padding:4px 0;font-size:13px;color:#64748b">Project</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{project}{f' - {section}' if section else ''}</td></tr>
+            <tr><td style="padding:4px 0;font-size:13px;color:#64748b">Affected Area</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{wet_sf:,.0f} SF</td></tr>
+            {f'<tr><td style="padding:4px 0;font-size:13px;color:#64748b">2-Way Vents</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{total_vents}</td></tr>' if total_vents else ''}
+            {f'<tr><td style="padding:4px 0;font-size:13px;color:#64748b">Monitoring Program</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{num_scans} scans over {int(num_scans) * int(scan_interval)} months</td></tr>' if not waive_scans else ''}
+          </table>
+        </div>
+
+        <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
+          <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Investment</p>
+          <table style="width:100%;border-collapse:collapse">
+            <tr><td style="padding:6px 12px;font-size:13px;color:#374151">ReDry 2-Way Vent System ({wet_sf:,.0f} SF)</td><td style="padding:6px 12px;font-size:13px;color:#374151;text-align:right">{fc(vent_total)}</td></tr>
+            {f'<tr><td style="padding:6px 12px;font-size:13px;color:#374151">Rental Tax ({tax_rate_val*100:.2f}%)</td><td style="padding:6px 12px;font-size:13px;color:#374151;text-align:right">{fc(tax_amount)}</td></tr>' if tax_amount > 0 else ''}
+            {scan_line}
+            <tr style="border-top:2px solid #1B2A4A"><td style="padding:10px 12px;font-size:15px;font-weight:800;color:#1B2A4A">Total</td><td style="padding:10px 12px;font-size:15px;font-weight:800;color:#1B2A4A;text-align:right">{fc(grand_total)}</td></tr>
+          </table>
+          <p style="font-size:13px;color:#374151;margin:12px 0 0 0;line-height:1.6">Standard terms: <strong>50% deposit</strong> ({fc(deposit_50)}) upon contract execution, with the remaining <strong>50% due at installation</strong>.</p>
+          {payment_teaser}
+        </div>
+
         <div style="margin:24px 0;text-align:center">
           <a href="{proposal_url}" style="display:inline-block;background:#E8943A;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">View &amp; Accept Proposal</a>
         </div>
-        <p style="font-size:13px;color:#64748b;line-height:1.6">This proposal includes the vent system lease, installation specifications, and moisture monitoring program details. If you have any questions, just reply to this email.</p>
+        <p style="font-size:13px;color:#64748b;line-height:1.6">If you have any questions at all, just reply to this email. We're happy to walk through the proposal with you or adjust anything to fit your needs.</p>
       </div>
       <div style="padding:16px;text-align:center;font-size:11px;color:#94a3b8">ReDry, LLC | Advancing the Science of Moisture Removal</div>
     </div>"""
@@ -279,7 +353,7 @@ def send_proposal(pid):
         db_update_status(pid, "sent", "sent_at")
         db_log_event(pid, "sent", {"to": to_email})
         send_email([ADMIN_EMAIL], f"Proposal Sent: {project} | {company}",
-            f'<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A"><div style="background:#1B2A4A;padding:16px 20px;text-align:center"><span style="color:#fff;font-size:16px;font-weight:700">RE<span style="color:#E8943A">DRY</span></span></div><div style="padding:20px;background:#fff;border:1px solid #e2e8f0"><p style="font-size:14px;color:#374151"><strong>Proposal sent</strong> to {to_email}</p><p style="font-size:13px;color:#64748b">{project} | {company}</p><a href="{proposal_url}" style="font-size:13px;color:#E8943A">View proposal</a></div></div>')
+            f'<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A"><div style="background:#1B2A4A;padding:16px 20px;text-align:center"><span style="color:#fff;font-size:16px;font-weight:700">RE<span style="color:#E8943A">DRY</span></span></div><div style="padding:20px;background:#fff;border:1px solid #e2e8f0"><p style="font-size:14px;color:#374151"><strong>Proposal sent</strong> to {to_email}</p><p style="font-size:13px;color:#64748b">{project} | {company} | {fc(grand_total)}</p><a href="{proposal_url}" style="font-size:13px;color:#E8943A">View proposal</a></div></div>')
     return jsonify({"sent": success, "to": to_email})
 
 # ─── Proposal Data & Assets ───
