@@ -30,6 +30,47 @@ const { useState, useRef, useEffect, useCallback } = React;
 const C = { orange: "#E8943A", navy: "#1B2A4A", dark: "#1a1a2e", gray: "#64748b", bg: "#f8f9fb", border: "#e2e8f0", green: "#16a34a", red: "#dc2626" };
 const API = "";
 
+// ─── Auth helpers ───
+let _authToken = "";
+function authHeaders() { return _authToken ? {"X-Auth-Token": _authToken} : {}; }
+function authFetch(url, opts = {}) {
+  opts.headers = {...(opts.headers||{}), ...authHeaders()};
+  return fetch(url, opts);
+}
+
+function LoginScreen({onLogin}) {
+  const [pw, setPw] = React.useState("");
+  const [error, setError] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const doLogin = async (e) => {
+    if(e) e.preventDefault(); setLoading(true); setError("");
+    try {
+      const r = await fetch(`${API}/api/auth/login`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({password:pw})});
+      const d = await r.json();
+      if(d.ok) { _authToken = d.token; onLogin(); }
+      else setError(d.error || "Invalid password");
+    } catch(err) { setError("Connection failed"); }
+    setLoading(false);
+  };
+  return (<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg}}>
+    <div style={{background:"#fff",borderRadius:12,padding:40,width:360,boxShadow:"0 4px 24px rgba(0,0,0,0.08)",textAlign:"center"}}>
+      <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>ReDry</div>
+      <h1 style={{fontSize:24,fontWeight:800,color:C.navy,margin:"0 0 8px",fontFamily:"'Playfair Display',serif"}}>Proposal Builder</h1>
+      <p style={{color:C.gray,fontSize:13,marginBottom:24}}>Enter your team password to continue.</p>
+      <div>
+        <input type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="Team password"
+          onKeyDown={e=>e.key==="Enter"&&doLogin()}
+          style={{width:"100%",padding:"12px 14px",border:`1px solid ${error?C.red:C.border}`,borderRadius:8,fontSize:14,marginBottom:12,outline:"none",boxSizing:"border-box"}} />
+        {error && <div style={{color:C.red,fontSize:12,marginBottom:12}}>{error}</div>}
+        <button onClick={doLogin} disabled={loading}
+          style={{width:"100%",padding:"12px",background:C.orange,color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",opacity:loading?0.6:1}}>
+          {loading ? "Signing in..." : "Sign In"}
+        </button>
+      </div>
+    </div>
+  </div>);
+}
+
 // ─── Google Places Autocomplete loader ───
 let _gmapsLoaded = false, _gmapsLoading = false, _gmapsCallbacks = [];
 function loadGoogleMaps(apiKey) {
@@ -53,7 +94,7 @@ function AddressAutocomplete({value, onChange, onPlaceSelect, placeholder, requi
 
   useEffect(() => {
     if (_gmapsLoaded) { setGmapsReady(true); return; }
-    fetch(`${API}/api/google-maps-key`).then(r=>r.json()).then(d=>{
+    authFetch(`${API}/api/google-maps-key`).then(r=>r.json()).then(d=>{
       if(d.key) loadGoogleMaps(d.key).then(()=>setGmapsReady(true));
     }).catch(()=>{});
   }, []);
@@ -215,7 +256,7 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
   useEffect(()=>{
     const st = form.projectState?.toUpperCase().trim();
     if(st && st.length===2){
-      fetch(`${API}/api/tax-rate?state=${st}`).then(r=>r.json()).then(d=>{
+      authFetch(`${API}/api/tax-rate?state=${st}`).then(r=>r.json()).then(d=>{
         if(d.rate !== undefined && !form.taxRateOverride) setTaxRate(d.rate);
       }).catch(()=>{});
     }
@@ -426,7 +467,7 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
               try{
                 const url = `${API}/api/proposal/${result.proposalId}/send`;
                 console.log("SENDING TO", url, email);
-                const res = await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+                const res = await authFetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
                 console.log("RESPONSE STATUS", res.status);
                 const d = await res.json();
                 console.log("RESPONSE DATA", d);
@@ -485,7 +526,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   useEffect(()=>{
     const st = form.projectState?.toUpperCase().trim();
     if(st && st.length===2){
-      fetch(`${API}/api/tax-rate?state=${st}`).then(r=>r.json()).then(d=>{
+      authFetch(`${API}/api/tax-rate?state=${st}`).then(r=>r.json()).then(d=>{
         if(d.rate !== undefined) { const ov=parseFloat(form.taxRateOverride); setTaxRate(!isNaN(ov)?ov/100:d.rate); }
       }).catch(()=>{});
     }
@@ -730,7 +771,7 @@ function ProposalSearch({onLoad, onBack}) {
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(()=>{
-    fetch(`${API}/api/proposals`).then(r=>r.json()).then(d=>{setProposals(d);setLoading(false);}).catch(()=>setLoading(false));
+    authFetch(`${API}/api/proposals`).then(r=>r.json()).then(d=>{setProposals(d);setLoading(false);}).catch(()=>setLoading(false));
   },[]);
 
   const statusColor = s => ({draft:"#94a3b8",sent:"#3b82f6",viewed:"#8b5cf6",signed:"#16a34a",paid:"#16a34a"}[s]||"#94a3b8");
@@ -804,11 +845,13 @@ function App() {
   const [result,setResult] = useState(null);
   const [proposalId,setProposalId] = useState(null);
   const [taxRate,setTaxRate] = useState(0);
+  const [authed,setAuthed] = useState(false);
 
   useEffect(()=>{
     const path = window.location.pathname;
     const match = path.match(/^\/proposal\/([a-f0-9]+)$/);
     if(match) {
+      // Client view - no auth needed
       const id = match[1];
       setProposalId(id);
       fetch(`${API}/api/proposal/${id}`).then(r=>r.json()).then(cfg=>{
@@ -816,9 +859,16 @@ function App() {
         delete cfg._ventMapFilename; delete cfg._createdAt;
         setForm(f=>({...f,...cfg}));
         if(ventFile) setVentMapUrl(`${API}/api/proposal/${id}/ventmap`);
+        setAuthed(true);
         setView("client");
-      }).catch(()=>setView("form"));
-    } else { setView("form"); }
+      }).catch(()=>{setView("form");});
+    } else {
+      // Builder - check auth
+      fetch(`${API}/api/auth/check`).then(r=>r.json()).then(d=>{
+        if(d.authenticated || !d.authRequired) { setAuthed(true); setView("form"); }
+        else setView("login");
+      }).catch(()=>setView("login"));
+    }
   },[]);
 
   useEffect(()=>{
@@ -830,7 +880,7 @@ function App() {
   const doPDF=async()=>{
     setLoading("pdf");setResult(null);
     try{
-      const r=await fetch(`${API}/api/generate-pdf`,{method:"POST",body:buildFD()});
+      const r=await authFetch(`${API}/api/generate-pdf`,{method:"POST",body:buildFD()});
       if(!r.ok)throw new Error("fail");
       const b=await r.blob(),u=URL.createObjectURL(b),a=document.createElement("a");
       a.href=u;a.download=`ReDry_Proposal_${form.projectName.replace(/\s+/g,"_")}_${form.projectSection.replace(/\s+/g,"_")}.pdf`;
@@ -842,7 +892,7 @@ function App() {
   const doLink=async()=>{
     setLoading("link");setResult(null);
     try{
-      const r=await fetch(`${API}/api/generate-proposal-link`,{method:"POST",body:buildFD()});
+      const r=await authFetch(`${API}/api/generate-proposal-link`,{method:"POST",body:buildFD()});
       if(!r.ok)throw new Error("fail");
       const d=await r.json();setResult({type:"link",...d});setProposalId(d.proposalId);
     }catch(e){alert("Failed to create link.");}
@@ -850,6 +900,7 @@ function App() {
   };
 
   if(view==="loading") return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.gray}}>Loading...</div>;
+  if(view==="login") return <LoginScreen onLogin={()=>{setAuthed(true);setView("form");}}/>;
   if(view==="client") return <ClientView form={form} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
   if(view==="search") return (<div style={{padding:"40px 20px"}}><ProposalSearch onBack={()=>setView("form")} onLoad={(pid)=>{
     fetch(`${API}/api/proposal/${pid}`).then(r=>r.json()).then(cfg=>{

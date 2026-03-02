@@ -4,15 +4,33 @@ ReDry Proposal Builder - Flask API Server
 PostgreSQL storage, Stripe payments, SendGrid emails, proposal lifecycle tracking.
 """
 
-from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file, send_from_directory, session
 from flask_cors import CORS
 from proposal_generator import generate_proposal_pdf
-import os, io, json, uuid, stripe, traceback, psycopg2, psycopg2.extras
+import os, io, json, uuid, stripe, traceback, psycopg2, psycopg2.extras, hashlib, secrets, functools
 from datetime import datetime, timezone
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__, static_folder="static")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 CORS(app)
+
+# ─── Auth ───
+TEAM_PASSWORD = os.environ.get("TEAM_PASSWORD", "")
+if not TEAM_PASSWORD:
+    print("WARNING: TEAM_PASSWORD not set. Auth will be disabled.")
+
+def require_auth(f):
+    """Decorator to protect admin/builder routes."""
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if not TEAM_PASSWORD:
+            return f(*args, **kwargs)
+        token = request.headers.get("X-Auth-Token") or request.cookies.get("auth_token") or ""
+        if not token or token != session.get("auth_token"):
+            return jsonify({"error": "Unauthorized"}), 401
+        return f(*args, **kwargs)
+    return wrapper
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PK = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
@@ -26,6 +44,35 @@ for name, val in [("STRIPE_SECRET_KEY", stripe.api_key), ("STRIPE_PUBLISHABLE_KE
                    ("GOOGLE_MAPS_API_KEY", GOOGLE_MAPS_KEY), ("DATABASE_URL", DATABASE_URL),
                    ("SENDGRID_API_KEY", SENDGRID_API_KEY)]:
     if not val: print(f"WARNING: {name} not set.")
+
+# ─── Auth Routes ───
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    data = request.get_json() or {}
+    pw = data.get("password", "")
+    if not TEAM_PASSWORD:
+        token = secrets.token_hex(32)
+        session["auth_token"] = token
+        return jsonify({"ok": True, "token": token})
+    if pw == TEAM_PASSWORD:
+        token = secrets.token_hex(32)
+        session["auth_token"] = token
+        return jsonify({"ok": True, "token": token})
+    return jsonify({"error": "Invalid password"}), 401
+
+@app.route("/api/auth/check")
+def auth_check():
+    if not TEAM_PASSWORD:
+        return jsonify({"authenticated": True, "authRequired": False})
+    token = request.headers.get("X-Auth-Token") or request.cookies.get("auth_token") or ""
+    if token and token == session.get("auth_token"):
+        return jsonify({"authenticated": True, "authRequired": True})
+    return jsonify({"authenticated": False, "authRequired": True})
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    session.pop("auth_token", None)
+    return jsonify({"ok": True})
 
 # ─── Database ───
 def get_db():
@@ -164,6 +211,7 @@ OPTION_LABELS = {1: "Pay in Full", 2: "50% Now. 50% at Install.", 3: "Let\u2019s
 
 # ─── API Routes ───
 @app.route("/api/tax-rate")
+@require_auth
 def get_tax_rate():
     state = request.args.get("state", "").upper().strip()
     rate = STATE_TAX_RATES.get(state, None)
@@ -171,15 +219,18 @@ def get_tax_rate():
     return jsonify({"state": state, "rate": rate, "note": "State base rate. Local rates may apply."})
 
 @app.route("/api/stripe-pk")
+@require_auth
 def get_stripe_pk():
     return jsonify({"pk": STRIPE_PK})
 
 @app.route("/api/google-maps-key")
+@require_auth
 def get_google_maps_key():
     return jsonify({"key": GOOGLE_MAPS_KEY})
 
 # ─── PDF Generation ───
 @app.route("/api/generate-pdf", methods=["POST"])
+@require_auth
 def generate_pdf():
     try:
         if request.content_type and "multipart" in request.content_type:
@@ -209,6 +260,7 @@ def generate_pdf():
 
 # ─── Proposal Link Generation ───
 @app.route("/api/generate-proposal-link", methods=["POST"])
+@require_auth
 def generate_proposal_link():
     try:
         if request.content_type and "multipart" in request.content_type:
@@ -238,6 +290,7 @@ def generate_proposal_link():
 
 # ─── Send Proposal via Email ───
 @app.route("/api/proposal/<pid>/send", methods=["POST"])
+@require_auth
 def send_proposal(pid):
     p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
     if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
@@ -548,6 +601,7 @@ def payment_confirm(pid):
 
 # ─── Proposal List / Dashboard ───
 @app.route("/api/proposals")
+@require_auth
 def list_proposals():
     proposals = []
     if DATABASE_URL:
@@ -578,6 +632,7 @@ def list_proposals():
     return jsonify(proposals)
 
 @app.route("/api/proposal/<pid>/events")
+@require_auth
 def get_proposal_events(pid):
     if not DATABASE_URL: return jsonify([])
     try:
