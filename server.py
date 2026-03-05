@@ -6,7 +6,7 @@ PostgreSQL storage, Stripe payments, SendGrid emails, proposal lifecycle trackin
 
 from flask import Flask, request, jsonify, send_file, send_from_directory, session
 from flask_cors import CORS
-from proposal_generator import generate_proposal_pdf
+from proposal_generator import generate_proposal_pdf, generate_client_pdf
 import os, io, json, uuid, stripe, traceback, psycopg2, psycopg2.extras, hashlib, secrets, functools
 from datetime import datetime, timezone
 from werkzeug.utils import secure_filename
@@ -304,10 +304,13 @@ def send_proposal(pid):
     section = cfg.get("projectSection", "")
     base_url = request.host_url.rstrip("/")
     proposal_url = f"{base_url}/proposal/{pid}"
-    pdf_path = os.path.join(PROPOSALS_DIR, f"{pid}.pdf")
-    pdf_bytes = None
-    if os.path.exists(pdf_path):
-        with open(pdf_path, "rb") as f: pdf_bytes = f.read()
+    # Generate client-facing PDF (no pricing) and save it
+    vent_map_filename = cfg.get("_ventMapFilename")
+    vent_map_path = os.path.join(PROPOSALS_DIR, vent_map_filename) if vent_map_filename else None
+    client_pdf_bytes = generate_client_pdf(cfg, logo_path=LOGO_PATH if os.path.exists(LOGO_PATH) else None,
+        vent_map_path=vent_map_path)
+    client_pdf_path = os.path.join(PROPOSALS_DIR, f"{pid}_client.pdf")
+    with open(client_pdf_path, "wb") as f: f.write(client_pdf_bytes)
 
     # Calculate pricing for email summary
     wet_sf = float(cfg.get("wetSF", 0) or 0)
@@ -399,9 +402,9 @@ def send_proposal(pid):
       <div style="padding:16px;text-align:center;font-size:11px;color:#94a3b8">ReDry, LLC | Advancing the Science of Moisture Removal</div>
     </div>"""
     attachments = []
-    if pdf_bytes:
-        pdf_name = f"ReDry_Proposal_{project.replace(' ','_')}{'_'+section.replace(' ','_') if section else ''}.pdf"
-        attachments.append((pdf_name, pdf_bytes, "application/pdf"))
+    if client_pdf_bytes:
+        pdf_name = f"ReDry_Overview_{project.replace(' ','_')}{'_'+section.replace(' ','_') if section else ''}.pdf"
+        attachments.append((pdf_name, client_pdf_bytes, "application/pdf"))
     success = send_email([to_email], subject, html, attachments)
     if success:
         db_update_status(pid, "sent", "sent_at")
@@ -423,6 +426,12 @@ def get_proposal_config(pid):
 @app.route("/api/proposal/<pid>/pdf")
 def get_proposal_pdf(pid):
     p = os.path.join(PROPOSALS_DIR, f"{pid}.pdf")
+    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
+    return send_file(p, mimetype="application/pdf")
+
+@app.route("/api/proposal/<pid>/client-pdf")
+def get_client_pdf(pid):
+    p = os.path.join(PROPOSALS_DIR, f"{pid}_client.pdf")
     if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
     return send_file(p, mimetype="application/pdf")
 
