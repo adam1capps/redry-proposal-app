@@ -821,6 +821,521 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
     return buf.read()
 
 
+def generate_client_pdf(config, logo_path=None, vent_map_path=None):
+    """
+    Generate a client-facing ReDry PDF that does NOT show vent system cost.
+    Focuses on building confidence in the ReDry system: how it works,
+    scope of work, performance criteria, and project details.
+
+    Returns: bytes of the PDF file
+    """
+    # Parse config
+    client_company = config.get("clientCompany", "")
+    client_contact = config.get("clientContact", "")
+    client_title = config.get("clientTitle", "")
+    client_phone = config.get("clientPhone", "")
+    client_email = config.get("clientEmail", "")
+
+    project_name = config.get("projectName", "Project")
+    project_address = config.get("projectAddress", "")
+    project_city = config.get("projectCity", "")
+    project_state = config.get("projectState", "")
+    project_zip = config.get("projectZip", "")
+    project_section = config.get("projectSection", "")
+
+    wet_sf = int(float(config.get("wetSF", 0)))
+    num_scans = int(float(config.get("numScans", 4)))
+    scan_interval = config.get("scanInterval", "3")
+    total_vents = config.get("totalVents", "")
+
+    proposal_id = config.get("_proposalId", "")
+
+    proposal_date_str = config.get("proposalDate", datetime.now().strftime("%Y-%m-%d"))
+    valid_days = int(config.get("validDays", 30))
+
+    # Compute values
+    full_address_parts = [project_address]
+    city_state_zip = ", ".join(filter(None, [project_city, project_state]))
+    if project_zip:
+        city_state_zip += " " + project_zip if city_state_zip else project_zip
+    if city_state_zip:
+        full_address_parts.append(city_state_zip)
+    full_address = ", ".join(full_address_parts)
+
+    proposal_date = datetime.strptime(proposal_date_str, "%Y-%m-%d")
+    proposal_date_display = proposal_date.strftime("%B %d, %Y").replace(" 0", " ")
+    valid_through_date = proposal_date + timedelta(days=valid_days)
+    valid_through = valid_through_date.strftime("%B %d, %Y").replace(" 0", " ")
+
+    mm = proposal_date.strftime("%m")
+    dd = proposal_date.strftime("%d")
+    proposal_num = f"P-{proposal_date.year}-{mm}{dd}"
+
+    # Client TO block
+    to_lines = []
+    if client_company:
+        to_lines.append(client_company)
+    if client_contact:
+        to_lines.append(client_contact)
+    if client_title:
+        to_lines.append(client_title)
+    if client_phone:
+        to_lines.append(client_phone)
+    if client_email:
+        to_lines.append(client_email)
+    to_text = "<br/>".join(to_lines) if to_lines else "[Client / General Contractor]"
+
+    # Vent count text
+    vent_count_text = ""
+    if total_vents:
+        vent_count_text = f", calling for an estimated <b>{total_vents} vents</b>"
+
+    # Number word
+    num_scans_word = num_to_word(num_scans)
+
+    # ── Build PDF ──
+    buf = io.BytesIO()
+
+    class ClientDocTemplate(BaseDocTemplate):
+        def __init__(self, filename, **kwargs):
+            super().__init__(filename, **kwargs)
+            frame = Frame(
+                MARGIN_L, MARGIN_B,
+                PAGE_W - MARGIN_L - MARGIN_R,
+                PAGE_H - MARGIN_T - MARGIN_B,
+                id='normal'
+            )
+            template = PageTemplate(id='main', frames=frame, onPage=self._draw_page)
+            self.addPageTemplates([template])
+
+        def _draw_page(self, canvas_obj, doc):
+            canvas_obj.saveState()
+            canvas_obj.setStrokeColor(ORANGE)
+            canvas_obj.setLineWidth(3)
+            canvas_obj.line(0, PAGE_H - 4, PAGE_W, PAGE_H - 4)
+
+            if logo_path and os.path.exists(logo_path):
+                from PIL import Image as PILImage
+                img = PILImage.open(logo_path)
+                img_w, img_h = img.size
+                aspect = img_h / img_w
+                footer_logo_w = 0.7 * inch
+                footer_logo_h = footer_logo_w * aspect
+                canvas_obj.drawImage(
+                    logo_path,
+                    MARGIN_L, 0.28 * inch,
+                    width=footer_logo_w, height=footer_logo_h,
+                    mask='auto', preserveAspectRatio=True
+                )
+
+            canvas_obj.setFont("Helvetica", 7.5)
+            canvas_obj.setFillColor(MED_GRAY)
+            canvas_obj.drawCentredString(
+                PAGE_W / 2, 0.4 * inch,
+                "ReDry, LLC  |  re-dry.com  |  info@re-dry.com  |  Confidential and Proprietary"
+            )
+            canvas_obj.drawRightString(
+                PAGE_W - MARGIN_R, 0.4 * inch,
+                f"Page {doc.page}"
+            )
+            canvas_obj.restoreState()
+
+    doc = ClientDocTemplate(
+        buf,
+        pagesize=letter,
+        leftMargin=MARGIN_L,
+        rightMargin=MARGIN_R,
+        topMargin=MARGIN_T,
+        bottomMargin=MARGIN_B,
+        title=f"ReDry Project Overview - {project_name}",
+        author="ReDry, LLC"
+    )
+
+    story = []
+    usable_width = PAGE_W - MARGIN_L - MARGIN_R
+
+    # ── HEADER ──
+    if logo_path and os.path.exists(logo_path):
+        from PIL import Image as PILImage
+        img = PILImage.open(logo_path)
+        img_w, img_h = img.size
+        aspect = img_h / img_w
+        logo_img = Image(logo_path, width=2.4 * inch, height=2.4 * inch * aspect)
+
+        header_data = [
+            [
+                logo_img,
+                Paragraph(f"Proposal No: {proposal_num}<br/>Date: {proposal_date_display}<br/>Valid Through: {valid_through}",
+                          ParagraphStyle('HeaderRight', parent=style_small, alignment=TA_RIGHT, fontSize=9, leading=13, textColor=MED_GRAY))
+            ]
+        ]
+        header_table = Table(header_data, colWidths=[usable_width * 0.6, usable_width * 0.4])
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(header_table)
+        story.append(Spacer(1, 6))
+
+    story.append(Paragraph("PROJECT OVERVIEW", style_title))
+    story.append(orange_rule())
+    story.append(Spacer(1, 4))
+
+    # ── FROM / TO ──
+    from_to_data = [
+        [
+            Paragraph("FROM", style_label),
+            Paragraph("TO", style_label),
+            Paragraph("PROJECT", style_label),
+        ],
+        [
+            Paragraph("ReDry, LLC<br/>Adam Capps, Founder<br/>865.771.3848<br/>adam@re-dry.com<br/>re-dry.com",
+                       ParagraphStyle('FromVal', parent=style_body, fontSize=9.5, leading=13, spaceAfter=0)),
+            Paragraph(to_text,
+                       ParagraphStyle('ToVal', parent=style_body, fontSize=9.5, leading=13, spaceAfter=0)),
+            Paragraph(f"<b>{project_name}</b><br/>{full_address}<br/>{project_section}<br/>Vent System Lease,<br/>Commissioning, and Monitoring",
+                       ParagraphStyle('ProjVal', parent=style_body, fontSize=9.5, leading=13, spaceAfter=0)),
+        ]
+    ]
+    from_to_table = Table(from_to_data, colWidths=[usable_width * 0.33, usable_width * 0.33, usable_width * 0.34])
+    from_to_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(from_to_table)
+    story.append(Spacer(1, 8))
+    story.append(thin_rule())
+
+    # ── 1. THE REDRY SOLUTION ──
+    story.append(Paragraph("1. THE REDRY SOLUTION", style_section_head))
+    story.append(Paragraph(
+        "ReDry, LLC is the manufacturer and lessor of the ReDry 2-Way Vent System, a proprietary solar-powered drying "
+        "system designed to remove trapped moisture from commercial roof insulation <b>without membrane removal or tear-off</b>. "
+        "The ReDry system preserves the existing roof assembly, eliminates the disruption of a full tear-off, and extends "
+        "the functional life of the roof.",
+        style_body
+    ))
+    story.append(Paragraph(
+        f"A Roof MRI moisture survey identified approximately <b>{wet_sf:,} square feet</b> of wet insulation "
+        f"within the {project_section} of {project_name}, located at {full_address}. "
+        f"ReDry has engineered a vent Placement Map specific to this section based on the "
+        f"survey data{vent_count_text}.",
+        style_body
+    ))
+    story.append(Spacer(1, 6))
+
+    # ── WHY REDRY – Confidence-building section ──
+    story.append(Paragraph("2. WHY REDRY", style_section_head))
+
+    # Benefits table
+    benefit_head = ParagraphStyle('BH', fontName='Helvetica-Bold', fontSize=10, leading=13, textColor=NAVY)
+    benefit_body = ParagraphStyle('BB', fontName='Helvetica', fontSize=9.5, leading=13, textColor=DARK_GRAY, spaceAfter=4)
+
+    benefits = [
+        ("No Tear-Off Required",
+         "The ReDry system dries wet insulation in place, eliminating the need for costly and disruptive roof tear-offs. "
+         "Your building operations continue uninterrupted while the system works."),
+        ("Solar-Powered, Maintenance-Free",
+         "Once installed, the ReDry 2-Way Vent System operates entirely on solar energy with no electrical connections, "
+         "moving parts, or ongoing maintenance required."),
+        ("Proven Drying Technology",
+         "The patented 2-Way Vent design actively exchanges moisture-laden air from the insulation layer with dry ambient "
+         "air, accelerating the natural drying process and delivering measurable results."),
+        ("Data-Driven Performance Monitoring",
+         f"ReDry conducts {num_scans} moisture scans at {scan_interval}-month intervals using Roof MRI technology. "
+         f"Each scan produces a detailed report documenting moisture levels and drying progress, so you can see the "
+         f"results for yourself."),
+        ("Engineered for Your Roof",
+         "Every Placement Map is custom-engineered based on your project's specific moisture survey data. Vent quantity "
+         "and positioning are optimized to maximize drying performance across the affected area."),
+        ("Equipment Remains ReDry's Property",
+         "The vent heads are leased, not purchased. ReDry retrieves them once the insulation reaches an acceptable dry "
+         "reading, leaving no permanent penetrations or equipment on your roof."),
+    ]
+
+    for title, desc in benefits:
+        benefit_block = [
+            [Paragraph(f"\u2713  {title}", benefit_head)],
+            [Paragraph(desc, benefit_body)],
+        ]
+        bt = Table(benefit_block, colWidths=[usable_width - 12])
+        bt.setStyle(TableStyle([
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (0, 0), 8),
+            ('TOPPADDING', (0, 1), (0, 1), 2),
+            ('BOTTOMPADDING', (0, 1), (0, 1), 6),
+            ('BACKGROUND', (0, 0), (-1, -1), LIGHT_GRAY),
+        ]))
+        story.append(bt)
+        story.append(Spacer(1, 4))
+
+    # ── 3. HOW IT WORKS ──
+    story.append(PageBreak())
+    story.append(Paragraph("3. HOW IT WORKS", style_section_head))
+
+    steps = [
+        ("Step 1: Moisture Survey",
+         "A comprehensive Roof MRI moisture scan identifies and maps all areas of wet insulation within the project area. "
+         "This data forms the foundation for the engineered Placement Map."),
+        ("Step 2: Placement Map Engineering",
+         "ReDry engineers a custom Placement Map that defines the exact quantity and position of every vent, optimized "
+         "for maximum drying performance based on the survey data."),
+        ("Step 3: 2-Way Vent Installation",
+         "The roofing contractor installs the 2-Way Vents per the ReDry Installation Specification. Vents are cored "
+         "through the membrane and insulation to access the wet layer beneath."),
+        ("Step 4: ReDry Commissioning",
+         "ReDry attaches the proprietary vent heads to each installed 2-Way Vent, confirms proper placement against "
+         "the Placement Map, and completes photo documentation for warranty activation."),
+        ("Step 5: Performance Monitoring",
+         f"ReDry returns at approximately {scan_interval}-month intervals to conduct full moisture scans of the "
+         f"treated area. Written reports document drying progress and verify system performance."),
+        ("Step 6: Vent Retrieval",
+         'Once the insulation reaches an acceptable "Dry" reading on the Roof MRI PHD scale, ReDry retrieves the '
+         "vent heads. The roofing contractor seals the remaining 2-Way Vent penetrations per standard practice."),
+    ]
+
+    step_num_style = ParagraphStyle('StepNum', fontName='Helvetica-Bold', fontSize=10, leading=13, textColor=WHITE, alignment=TA_CENTER)
+    step_title_style = ParagraphStyle('StepTitle', fontName='Helvetica-Bold', fontSize=10, leading=13, textColor=NAVY)
+    step_body_style = ParagraphStyle('StepBody', fontName='Helvetica', fontSize=9.5, leading=13, textColor=DARK_GRAY, spaceAfter=2)
+
+    for i, (title, desc) in enumerate(steps, 1):
+        # Number badge + title + description
+        badge_data = [[Paragraph(str(i), step_num_style)]]
+        badge = Table(badge_data, colWidths=[0.3 * inch], rowHeights=[0.3 * inch])
+        badge.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), ORANGE),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('ROUNDEDCORNERS', [4, 4, 4, 4]),
+        ]))
+
+        step_data = [[badge, Paragraph(title.split(": ", 1)[1] if ": " in title else title, step_title_style)],
+                      ["", Paragraph(desc, step_body_style)]]
+        step_table = Table(step_data, colWidths=[0.45 * inch, usable_width - 0.45 * inch])
+        step_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, -1), (-1, -1), 8),
+            ('SPAN', (0, 0), (0, 0)),
+        ]))
+        story.append(step_table)
+
+    # ── 4. PERFORMANCE CRITERIA ──
+    story.append(Spacer(1, 4))
+    story.append(Paragraph("4. PERFORMANCE CRITERIA", style_section_head))
+    story.append(Paragraph(
+        "Drying performance is evaluated using the Roof MRI PHD (Precise Hydrology Detection) scale. "
+        "The ReDry Vents remain in place and continue operating until the insulation in each vent's service "
+        'area reaches an acceptable "Dry" threshold:',
+        style_body
+    ))
+    story.append(Spacer(1, 4))
+
+    # PHD Scale table
+    phd_data = [
+        [Paragraph("PHD Setting", style_table_header),
+         Paragraph("Dry", style_table_header),
+         Paragraph("Damp", style_table_header),
+         Paragraph("Saturated", style_table_header)],
+        [Paragraph("Level 3", style_table_cell_bold),
+         Paragraph("0 \u2013 35", ParagraphStyle('GreenCellC', parent=style_table_cell, textColor=HexColor("#228B22"))),
+         Paragraph("35 \u2013 70", ParagraphStyle('OrangeCellC', parent=style_table_cell, textColor=ORANGE)),
+         Paragraph("70 \u2013 99", ParagraphStyle('RedCellC', parent=style_table_cell, textColor=HexColor("#CC0000")))],
+        [Paragraph("Level 2", style_table_cell_bold),
+         Paragraph("0 \u2013 15", ParagraphStyle('GreenCell2C', parent=style_table_cell, textColor=HexColor("#228B22"))),
+         Paragraph("15 \u2013 40", ParagraphStyle('OrangeCell2C', parent=style_table_cell, textColor=ORANGE)),
+         Paragraph("40 \u2013 99", ParagraphStyle('RedCell2C', parent=style_table_cell, textColor=HexColor("#CC0000")))],
+        [Paragraph("Level 1", style_table_cell_bold),
+         Paragraph("0", ParagraphStyle('GreenCell3C', parent=style_table_cell, textColor=HexColor("#228B22"))),
+         Paragraph("1 \u2013 20", ParagraphStyle('OrangeCell3C', parent=style_table_cell, textColor=ORANGE)),
+         Paragraph("21 \u2013 99", ParagraphStyle('RedCell3C', parent=style_table_cell, textColor=HexColor("#CC0000")))],
+    ]
+    phd_table = Table(phd_data, colWidths=[usable_width * 0.25] * 4)
+    phd_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), NAVY),
+        ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
+        ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9.5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, BORDER_GRAY),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LIGHT_GRAY, WHITE]),
+    ]))
+    story.append(phd_table)
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph(
+        'Vents serving areas that have reached the "Dry" threshold on the applicable PHD setting will be '
+        'retrieved by ReDry at the next scheduled site visit. Vents serving areas that remain in the "Damp" '
+        'or "Saturated" range will remain in place and continue operating until acceptable readings are achieved.',
+        style_body
+    ))
+
+    # ── 5. PROJECT SCOPE SUMMARY ──
+    story.append(Spacer(1, 4))
+    story.append(Paragraph("5. PROJECT SCOPE SUMMARY", style_section_head))
+
+    # Summary table - no cost information
+    summary_rows = [
+        [Paragraph("Item", style_table_header), Paragraph("Detail", style_table_header)],
+        [Paragraph("Project", style_table_cell_bold), Paragraph(f"{project_name} \u2013 {project_section}", style_table_cell)],
+        [Paragraph("Location", style_table_cell_bold), Paragraph(full_address, style_table_cell)],
+        [Paragraph("Affected Area", style_table_cell_bold), Paragraph(f"{wet_sf:,} square feet of wet insulation", style_table_cell)],
+    ]
+    if total_vents:
+        summary_rows.append(
+            [Paragraph("Estimated Vents", style_table_cell_bold), Paragraph(f"{total_vents} vents per Placement Map", style_table_cell)]
+        )
+    summary_rows.append(
+        [Paragraph("Monitoring Program", style_table_cell_bold),
+         Paragraph(f"{num_scans} moisture scans at {scan_interval}-month intervals", style_table_cell)]
+    )
+    summary_rows.append(
+        [Paragraph("Monitoring Duration", style_table_cell_bold),
+         Paragraph(f"Approximately {int(num_scans) * int(scan_interval)} months", style_table_cell)]
+    )
+
+    summary_table = Table(summary_rows, colWidths=[usable_width * 0.30, usable_width * 0.70])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), NAVY),
+        ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
+        ('GRID', (0, 0), (-1, -1), 0.5, BORDER_GRAY),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LIGHT_GRAY, WHITE]),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 10))
+
+    # ReDry includes list
+    story.append(Paragraph("<b>What ReDry Provides:</b>", style_body))
+    includes = [
+        "All ReDry 2-Way Vents and proprietary vent heads per the engineered Placement Map.",
+        "Installation Specification and Placement Map for the roofing contractor.",
+        "On-site commissioning: vent head attachment, placement verification, and photo documentation.",
+        f"{num_scans} Roof MRI moisture scans with detailed written reports.",
+        "Vent retrieval once drying targets are achieved.",
+    ]
+    for item in includes:
+        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;\u2022&nbsp;&nbsp;{item}", style_body))
+    story.append(Spacer(1, 6))
+
+    story.append(Paragraph("<b>Roofing Contractor Responsibilities:</b>", style_body))
+    contractor_items = [
+        "Installation and adhesive bonding of the 2-Way Vents to the roof membrane per the ReDry Installation Specification.",
+        "Coring of the roof membrane and insulation per specification.",
+        "Sealing of 2-Way Vent penetrations after vent head retrieval.",
+    ]
+    for item in contractor_items:
+        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;\u2022&nbsp;&nbsp;{item}", style_body))
+
+    # ── 6. NEXT STEPS ──
+    story.append(Spacer(1, 4))
+    story.append(Paragraph("6. NEXT STEPS", style_section_head))
+    story.append(Paragraph(
+        "To move forward with the ReDry solution for your project, review the full proposal at the link below. "
+        "You will be able to see all available options, provide your electronic signature, and submit your initial payment online.",
+        style_body
+    ))
+    story.append(Spacer(1, 4))
+
+    # Online acceptance box
+    if proposal_id:
+        proposal_url = f"https://redry-proposal-app.onrender.com/proposal/{proposal_id}"
+
+        cta_small = ParagraphStyle('CTASmall', parent=style_small, alignment=TA_CENTER, fontSize=9, spaceAfter=0, textColor=MED_GRAY)
+        btn_text = ParagraphStyle('BtnText', fontName='Helvetica-Bold', fontSize=14, leading=18,
+                                   textColor=WHITE, alignment=TA_CENTER, spaceAfter=0)
+
+        story.append(Spacer(1, 4))
+        story.append(Paragraph("View the full proposal, select your payment option, and accept online:", cta_small))
+        story.append(Spacer(1, 8))
+
+        # Orange button
+        btn_data = [[Paragraph(f'<a href="{proposal_url}" color="#FFFFFF">VIEW FULL PROPOSAL</a>', btn_text)]]
+        btn_table = Table(btn_data, colWidths=[usable_width * 0.55])
+        btn_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), ORANGE),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 14),
+            ('ROUNDEDCORNERS', [8, 8, 8, 8]),
+        ]))
+        outer = Table([[btn_table]], colWidths=[usable_width])
+        outer.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
+        story.append(outer)
+
+        story.append(Spacer(1, 8))
+        story.append(Paragraph(f"This proposal is valid through {valid_through}.", cta_small))
+    else:
+        story.append(Paragraph(
+            "A secure online link will be provided for proposal review and acceptance.",
+            style_body
+        ))
+
+    story.append(Spacer(1, 12))
+    story.append(Paragraph(
+        "If you have any questions about this project or the ReDry system, please contact Adam Capps at "
+        "adam@re-dry.com or 865.771.3848. We look forward to working with you.",
+        style_body
+    ))
+
+    # ── PAGE: VENT MAP EXHIBIT ──
+    story.append(PageBreak())
+    story.append(Paragraph("EXHIBIT A: VENT PLACEMENT MAP", style_title))
+    story.append(orange_rule())
+    story.append(Paragraph(
+        f"{project_name} | {full_address} | {project_section}",
+        style_subtitle
+    ))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        f"Wet insulation area: {wet_sf:,} SF. Vent quantity and placement per ReDry engineering. "
+        "This map is a controlled document and shall not be modified without written authorization from ReDry.",
+        style_body
+    ))
+    story.append(Spacer(1, 8))
+
+    if vent_map_path and os.path.exists(vent_map_path):
+        from PIL import Image as PILImage
+        img = PILImage.open(vent_map_path)
+        img_w, img_h = img.size
+        aspect = img_h / img_w
+        display_w = usable_width * 0.9
+        display_h = display_w * aspect
+        max_h = 5.5 * inch
+        if display_h > max_h:
+            display_h = max_h
+            display_w = display_h / aspect
+        vent_map_img = Image(vent_map_path, width=display_w, height=display_h)
+        story.append(vent_map_img)
+        story.append(Spacer(1, 10))
+
+    story.append(Paragraph(
+        "Heat map color key: Green = dry, Yellow = moderate moisture, Orange = elevated moisture, Red = saturated. "
+        "Vent icons indicate engineered placement locations.",
+        style_small
+    ))
+
+    # Build
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
+
 if __name__ == "__main__":
     # Test with sample data
     config = {
