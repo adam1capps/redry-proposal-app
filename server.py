@@ -38,7 +38,9 @@ GOOGLE_MAPS_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "adam@re-dry.com")
-FROM_EMAIL = os.environ.get("FROM_EMAIL", "proposals@re-dry.com")
+NOTIFY_EMAILS = [e.strip() for e in os.environ.get("NOTIFY_EMAILS", "adam@re-dry.com,regina@re-dry.com").split(",") if e.strip()]
+FROM_EMAIL = os.environ.get("FROM_EMAIL", "adam@re-dry.com")
+REPLY_TO_EMAIL = os.environ.get("REPLY_TO_EMAIL", "adam@re-dry.com")
 
 for name, val in [("STRIPE_SECRET_KEY", stripe.api_key), ("STRIPE_PUBLISHABLE_KEY", STRIPE_PK),
                    ("GOOGLE_MAPS_API_KEY", GOOGLE_MAPS_KEY), ("DATABASE_URL", DATABASE_URL),
@@ -163,16 +165,31 @@ def db_store_payment(pid, pmt_data):
     except Exception as e: print(f"DB error (store_payment): {e}")
 
 # ─── Email (SendGrid) ───
-def send_email(to_emails, subject, html_body, attachments=None):
+def send_email(to_emails, subject, html_body, attachments=None, reply_to=None):
     if not SENDGRID_API_KEY:
         print(f"SKIP EMAIL (no key): {subject} -> {to_emails}")
         return False
     try:
         from sendgrid import SendGridAPIClient
-        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+        from sendgrid.helpers.mail import (Mail, Attachment, FileContent, FileName,
+            FileType, Disposition, ReplyTo, Header)
         import base64
         if isinstance(to_emails, str): to_emails = [to_emails]
-        message = Mail(from_email=(FROM_EMAIL, "ReDry Proposals"), to_emails=to_emails, subject=subject, html_content=html_body)
+
+        message = Mail(
+            from_email=(FROM_EMAIL, "Adam Capps | ReDry"),
+            to_emails=to_emails,
+            subject=subject,
+            html_content=html_body
+        )
+
+        # Reply-To so client replies go to a real person
+        message.reply_to = ReplyTo(reply_to or REPLY_TO_EMAIL, "Adam Capps")
+
+        # Deliverability headers
+        message.header = Header("X-Priority", "3")  # Normal priority (not spammy)
+        message.header = Header("X-Mailer", "ReDry Proposal System")
+
         if attachments:
             for fname, fbytes, ftype in attachments:
                 att = Attachment(FileContent(base64.b64encode(fbytes).decode()), FileName(fname),
@@ -409,7 +426,7 @@ def send_proposal(pid):
     if success:
         db_update_status(pid, "sent", "sent_at")
         db_log_event(pid, "sent", {"to": to_email})
-        send_email([ADMIN_EMAIL], f"Proposal Sent: {project} | {company}",
+        send_email(NOTIFY_EMAILS, f"Proposal Sent: {project} | {company}",
             f'<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A"><div style="background:#1B2A4A;padding:16px 20px;text-align:center"><span style="color:#fff;font-size:16px;font-weight:700">RE<span style="color:#E8943A">DRY</span></span></div><div style="padding:20px;background:#fff;border:1px solid #e2e8f0"><p style="font-size:14px;color:#374151"><strong>Proposal sent</strong> to {to_email}</p><p style="font-size:13px;color:#64748b">{project} | {company} | {fc(grand_total)}</p><a href="{proposal_url}" style="font-size:13px;color:#E8943A">View proposal</a></div></div>')
     return jsonify({"sent": success, "to": to_email})
 
@@ -501,7 +518,7 @@ def accept_proposal(pid):
     if pdf_bytes:
         pdf_name = f"ReDry_Proposal_{project.replace(' ','_')}{'_'+section.replace(' ','_') if section else ''}.pdf"
         attachments.append((pdf_name, pdf_bytes, "application/pdf"))
-    send_email([ADMIN_EMAIL], f"Proposal Accepted: {project} | {company}", admin_html, attachments)
+    send_email(NOTIFY_EMAILS, f"Proposal Accepted: {project} | {company}", admin_html, attachments)
     if client_email:
         client_html = f"""
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
@@ -587,7 +604,7 @@ def payment_confirm(pid):
       </div>
       <div style="padding:16px;text-align:center;font-size:11px;color:#94a3b8">ReDry, LLC | Advancing the Science of Moisture Removal</div>
     </div>"""
-    send_email([ADMIN_EMAIL], f"Payment Received: {pmt_label} | {project}", admin_html)
+    send_email(NOTIFY_EMAILS, f"Payment Received: {pmt_label} | {project}", admin_html)
     if client_email:
         client_html = f"""
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
