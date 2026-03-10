@@ -482,6 +482,26 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
             <div style={{fontSize:13,color:"#15803d",fontWeight:600}}>&#10003; Proposal emailed to {result.sentTo}</div>
           )}
         </div>
+
+        {/* Send for Approval */}
+        <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
+          {!result.approvalSent ? (
+            <button onClick={async()=>{
+              onSetResult(r=>({...r,sendingApproval:true}));
+              try{
+                const res = await authFetch(`${API}/api/proposal/${result.proposalId}/send-for-approval`,{method:"POST",headers:{"Content-Type":"application/json"}});
+                const d = await res.json();
+                if(d.sent) onSetResult(r=>({...r,approvalSent:true,sendingApproval:false,approvalTo:d.to}));
+                else {alert("Failed to send: "+(d.error||"Unknown error")); onSetResult(r=>({...r,sendingApproval:false}));}
+              }catch(e){alert("Error: "+e.message); onSetResult(r=>({...r,sendingApproval:false}));}
+            }} disabled={result.sendingApproval}
+              style={{width:"100%",padding:"10px 20px",border:"2px solid #1B2A4A",borderRadius:6,background:result.sendingApproval?"#cbd5e1":"#fff",color:"#1B2A4A",fontSize:13,fontWeight:700,cursor:result.sendingApproval?"wait":"pointer"}}>
+              {result.sendingApproval?"Sending...":"Send for Approval"}
+            </button>
+          ) : (
+            <div style={{fontSize:13,color:"#15803d",fontWeight:600}}>&#10003; Approval request sent to {result.approvalTo}</div>
+          )}
+        </div>
       </div>}
     </div>}
   </div>);
