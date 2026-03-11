@@ -238,7 +238,7 @@ function PHDTable({compact}) {
 }
 
 // ─── BUILDER FORM ───
-function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,taxRate,setTaxRate,onSearch}) {
+function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,taxRate,setTaxRate,onSearch,onDashboard}) {
   const fileRef = useRef();
   const [presets,setPresetsState] = useState(loadPresets());
   const [presetName,setPresetName] = useState("");
@@ -285,10 +285,16 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
       <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>ReDry Proposal Builder</div>
       <h1 style={{fontSize:28,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>Create New Proposal</h1>
       <p style={{color:C.gray,fontSize:14,marginTop:6}}>Fill in the project details to generate a branded PDF and shareable client link.</p>
-      {onSearch && <button onClick={onSearch} style={{marginTop:10,background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,transition:"all 0.15s"}}
-        onMouseEnter={e=>{e.currentTarget.style.borderColor=C.orange;e.currentTarget.style.color=C.orange}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.navy}}>
-        &#128269; Past Proposals
-      </button>}
+      <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:10}}>
+        {onSearch && <button onClick={onSearch} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,transition:"all 0.15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor=C.orange;e.currentTarget.style.color=C.orange}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.navy}}>
+          &#128269; Past Proposals
+        </button>}
+        {onDashboard && <button onClick={onDashboard} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,transition:"all 0.15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor=C.orange;e.currentTarget.style.color=C.orange}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.navy}}>
+          &#128202; Dashboard
+        </button>}
+      </div>
     </div>
 
     {/* Presets Bar */}
@@ -784,6 +790,151 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   </div>);
 }
 
+// ─── DASHBOARD ───
+function Dashboard({onBack}) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("proposals");
+
+  useEffect(() => {
+    authFetch(`${API}/api/dashboard`).then(r=>r.json()).then(d=>{setData(d);setLoading(false);}).catch(()=>setLoading(false));
+  }, []);
+
+  const fmtDate = d => d ? new Date(d).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}) : "—";
+  const fmtMoney = cents => cents ? `$${(cents/100).toLocaleString("en-US",{minimumFractionDigits:2})}` : "$0.00";
+  const statusColor = s => ({draft:"#94a3b8",sent:"#3b82f6",viewed:"#8b5cf6",signed:"#16a34a",paid:"#16a34a"}[s]||"#94a3b8");
+  const statusLabel = s => ({draft:"Draft",sent:"Sent",viewed:"Viewed",signed:"Signed",paid:"Paid"}[s]||"Draft");
+
+  const statCard = (label, value, color) => (
+    <div style={{flex:1,minWidth:120,background:"#fff",borderRadius:10,padding:"18px 16px",border:`1px solid ${C.border}`,textAlign:"center"}}>
+      <div style={{fontSize:28,fontWeight:800,color:color||C.navy,fontFamily:"'Playfair Display',serif"}}>{value}</div>
+      <div style={{fontSize:11,fontWeight:600,color:C.gray,textTransform:"uppercase",letterSpacing:0.5,marginTop:4}}>{label}</div>
+    </div>
+  );
+
+  const tabBtn = (key, label) => (
+    <button onClick={()=>setTab(key)} style={{padding:"8px 20px",borderRadius:6,border:`1px solid ${tab===key?C.navy:C.border}`,
+      background:tab===key?C.navy:"#fff",color:tab===key?"#fff":C.dark,fontSize:13,fontWeight:600,cursor:"pointer",transition:"all 0.15s"}}>
+      {label}
+    </button>
+  );
+
+  const thStyle = {padding:"10px 12px",textAlign:"left",fontSize:11,fontWeight:700,color:C.gray,textTransform:"uppercase",letterSpacing:0.5,borderBottom:`2px solid ${C.border}`,whiteSpace:"nowrap"};
+  const tdStyle = {padding:"10px 12px",fontSize:13,color:C.dark,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:200};
+
+  if(loading) return <div style={{minHeight:"60vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.gray}}>Loading dashboard...</div>;
+  if(!data) return <div style={{textAlign:"center",color:C.gray,padding:40}}>Failed to load dashboard data.</div>;
+
+  const {stats, proposals, signatures, payments} = data;
+
+  return (<div style={{maxWidth:1100,margin:"0 auto"}}>
+    <div style={{textAlign:"center",marginBottom:28}}>
+      <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>ReDry Proposal Builder</div>
+      <h1 style={{fontSize:28,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>Database Dashboard</h1>
+      <p style={{color:C.gray,fontSize:14,marginTop:6}}>Overview of all proposals, signatures, and payments.</p>
+      <button onClick={onBack} style={{marginTop:10,background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,transition:"all 0.15s"}}
+        onMouseEnter={e=>{e.currentTarget.style.borderColor=C.orange;e.currentTarget.style.color=C.orange}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.navy}}>
+        &larr; Back to Builder
+      </button>
+    </div>
+
+    {/* Stats cards */}
+    <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap"}}>
+      {statCard("Total Proposals", stats.totalProposals, C.navy)}
+      {statCard("Sent", stats.sent, "#3b82f6")}
+      {statCard("Viewed", stats.viewed, "#8b5cf6")}
+      {statCard("Signed", stats.signed, C.green)}
+      {statCard("Paid", stats.paid, C.green)}
+      {statCard("Revenue", fmtMoney(stats.totalRevenue), C.orange)}
+    </div>
+
+    {/* Tabs */}
+    <div style={{display:"flex",gap:8,marginBottom:16}}>
+      {tabBtn("proposals", `Proposals (${proposals.length})`)}
+      {tabBtn("signatures", `Signatures (${signatures.length})`)}
+      {tabBtn("payments", `Payments (${payments.length})`)}
+    </div>
+
+    {/* Proposals table */}
+    {tab==="proposals" && <div style={{background:"#fff",borderRadius:10,border:`1px solid ${C.border}`,overflowX:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr>
+          <th style={thStyle}>Project</th><th style={thStyle}>Company</th><th style={thStyle}>Contact</th>
+          <th style={thStyle}>Email</th><th style={thStyle}>Status</th><th style={thStyle}>Created</th>
+          <th style={thStyle}>Sent</th><th style={thStyle}>Viewed</th><th style={thStyle}>Signed</th><th style={thStyle}>Paid</th>
+        </tr></thead>
+        <tbody>
+          {proposals.length===0 && <tr><td colSpan={10} style={{...tdStyle,textAlign:"center",color:C.gray,padding:30}}>No proposals yet.</td></tr>}
+          {proposals.map(p=>(
+            <tr key={p.id} style={{transition:"background 0.1s"}} onMouseEnter={e=>e.currentTarget.style.background="#f8f9fb"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <td style={tdStyle}><span style={{fontWeight:600,color:C.navy}}>{p.projectName||"Untitled"}</span><br/><span style={{fontSize:10,color:C.gray}}>{p.id.slice(0,12)}...</span></td>
+              <td style={tdStyle}>{p.clientCompany||"—"}</td>
+              <td style={tdStyle}>{p.clientContact||"—"}</td>
+              <td style={tdStyle}>{p.clientEmail||"—"}</td>
+              <td style={tdStyle}><span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,fontSize:11,fontWeight:700,color:"#fff",background:statusColor(p.status)}}>{statusLabel(p.status)}</span></td>
+              <td style={tdStyle}>{fmtDate(p.createdAt)}</td>
+              <td style={tdStyle}>{fmtDate(p.sentAt)}</td>
+              <td style={tdStyle}>{fmtDate(p.viewedAt)}</td>
+              <td style={tdStyle}>{fmtDate(p.signedAt)}</td>
+              <td style={tdStyle}>{fmtDate(p.paidAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>}
+
+    {/* Signatures table */}
+    {tab==="signatures" && <div style={{background:"#fff",borderRadius:10,border:`1px solid ${C.border}`,overflowX:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr>
+          <th style={thStyle}>Project</th><th style={thStyle}>Signer</th><th style={thStyle}>Date Signed</th>
+          <th style={thStyle}>Option Selected</th><th style={thStyle}>Signed At</th>
+        </tr></thead>
+        <tbody>
+          {signatures.length===0 && <tr><td colSpan={5} style={{...tdStyle,textAlign:"center",color:C.gray,padding:30}}>No signatures yet.</td></tr>}
+          {signatures.map(s=>(
+            <tr key={s.id} onMouseEnter={e=>e.currentTarget.style.background="#f8f9fb"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <td style={tdStyle}><span style={{fontWeight:600,color:C.navy}}>{s.projectName||"—"}</span><br/><span style={{fontSize:10,color:C.gray}}>{s.proposalId.slice(0,12)}...</span></td>
+              <td style={tdStyle}>{s.signerName}</td>
+              <td style={tdStyle}>{s.signerDate||"—"}</td>
+              <td style={tdStyle}><span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,fontSize:11,fontWeight:700,color:"#fff",background:C.orange}}>Option {s.selectedOption}</span></td>
+              <td style={tdStyle}>{fmtDate(s.signedAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>}
+
+    {/* Payments table */}
+    {tab==="payments" && <div style={{background:"#fff",borderRadius:10,border:`1px solid ${C.border}`,overflowX:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr>
+          <th style={thStyle}>Project</th><th style={thStyle}>Option</th><th style={thStyle}>Payment #</th>
+          <th style={thStyle}>Amount</th><th style={thStyle}>Method</th><th style={thStyle}>Paid At</th>
+        </tr></thead>
+        <tbody>
+          {payments.length===0 && <tr><td colSpan={6} style={{...tdStyle,textAlign:"center",color:C.gray,padding:30}}>No payments yet.</td></tr>}
+          {payments.map(p=>(
+            <tr key={p.id} onMouseEnter={e=>e.currentTarget.style.background="#f8f9fb"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <td style={tdStyle}><span style={{fontWeight:600,color:C.navy}}>{p.projectName||"—"}</span><br/><span style={{fontSize:10,color:C.gray}}>{p.proposalId.slice(0,12)}...</span></td>
+              <td style={tdStyle}>Option {p.optionNum}</td>
+              <td style={tdStyle}>#{p.paymentNumber}</td>
+              <td style={tdStyle}><span style={{fontWeight:700,color:C.green}}>{fmtMoney(p.amountCents)}</span></td>
+              <td style={tdStyle}><span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,fontSize:11,fontWeight:600,
+                background:p.method==="ach"?"#f0fdf4":"#fef7ed",color:p.method==="ach"?C.green:C.orange}}>{p.method==="ach"?"ACH":"Card"}</span></td>
+              <td style={tdStyle}>{fmtDate(p.paidAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>}
+
+    <div style={{textAlign:"center",color:C.gray,fontSize:11,marginTop:16,paddingBottom:20}}>
+      Data loaded from PostgreSQL &bull; {proposals.length} proposals &bull; {signatures.length} signatures &bull; {payments.length} payments
+    </div>
+  </div>);
+}
+
 // ─── MAIN ───
 function ProposalSearch({onLoad, onBack}) {
   const [proposals, setProposals] = React.useState([]);
@@ -922,6 +1073,7 @@ function App() {
   if(view==="loading") return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.gray}}>Loading...</div>;
   if(view==="login") return <LoginScreen onLogin={()=>{setAuthed(true);setView("form");}}/>;
   if(view==="client") return <ClientView form={form} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
+  if(view==="dashboard") return (<div style={{padding:"40px 20px"}}><Dashboard onBack={()=>setView("form")}/></div>);
   if(view==="search") return (<div style={{padding:"40px 20px"}}><ProposalSearch onBack={()=>setView("form")} onLoad={(pid)=>{
     fetch(`${API}/api/proposal/${pid}`).then(r=>r.json()).then(cfg=>{
       const ventFile = cfg._ventMapFilename;
@@ -933,7 +1085,7 @@ function App() {
       setView("form");
     }).catch(()=>alert("Failed to load proposal."));
   }}/></div>);
-  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} onSetResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate} onSearch={()=>setView("search")}/></div>);
+  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} onSetResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate} onSearch={()=>setView("search")} onDashboard={()=>setView("dashboard")}/></div>);
 }
 
 class ErrorBoundary extends React.Component {

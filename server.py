@@ -728,6 +728,57 @@ def get_proposal_events(pid):
         conn.close(); return jsonify(events)
     except Exception as e: return jsonify({"error": str(e)}), 500
 
+# ─── Dashboard API ───
+@app.route("/api/dashboard")
+@require_auth
+def dashboard_data():
+    stats = {"totalProposals": 0, "sent": 0, "viewed": 0, "signed": 0, "paid": 0, "totalRevenue": 0}
+    proposals = []; signatures = []; payments = []
+    if not DATABASE_URL:
+        return jsonify({"stats": stats, "proposals": [], "signatures": [], "payments": []})
+    try:
+        conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        # Proposals
+        cur.execute("""SELECT p.id, p.config->>'projectName' as project_name, p.config->>'clientCompany' as client_company,
+            p.config->>'clientContact' as client_contact, p.config->>'clientEmail' as client_email,
+            p.status, p.created_at, p.sent_at, p.viewed_at, p.signed_at, p.paid_at FROM proposals p ORDER BY p.created_at DESC""")
+        for row in cur.fetchall():
+            proposals.append({k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in {
+                "id": row["id"], "projectName": row["project_name"] or "", "clientCompany": row["client_company"] or "",
+                "clientContact": row["client_contact"] or "", "clientEmail": row["client_email"] or "",
+                "status": row["status"] or "draft", "createdAt": row["created_at"], "sentAt": row["sent_at"],
+                "viewedAt": row["viewed_at"], "signedAt": row["signed_at"], "paidAt": row["paid_at"]
+            }.items()})
+        stats["totalProposals"] = len(proposals)
+        for p in proposals:
+            s = p.get("status","")
+            if s in stats: stats[s] += 1
+        # Signatures
+        cur.execute("""SELECT s.id, s.proposal_id, s.signer_name, s.signer_date, s.selected_option, s.signed_at,
+            p.config->>'projectName' as project_name FROM signatures s
+            LEFT JOIN proposals p ON p.id = s.proposal_id ORDER BY s.signed_at DESC""")
+        for row in cur.fetchall():
+            signatures.append({k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in {
+                "id": row["id"], "proposalId": row["proposal_id"], "signerName": row["signer_name"],
+                "signerDate": row["signer_date"], "selectedOption": row["selected_option"],
+                "signedAt": row["signed_at"], "projectName": row["project_name"] or ""
+            }.items()})
+        # Payments
+        cur.execute("""SELECT py.id, py.proposal_id, py.option_num, py.payment_number, py.amount_cents, py.method,
+            py.paid_at, p.config->>'projectName' as project_name FROM payments py
+            LEFT JOIN proposals p ON p.id = py.proposal_id ORDER BY py.paid_at DESC""")
+        for row in cur.fetchall():
+            payments.append({k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in {
+                "id": row["id"], "proposalId": row["proposal_id"], "optionNum": row["option_num"],
+                "paymentNumber": row["payment_number"], "amountCents": row["amount_cents"],
+                "method": row["method"], "paidAt": row["paid_at"], "projectName": row["project_name"] or ""
+            }.items()})
+        stats["totalRevenue"] = sum(p.get("amountCents", 0) or 0 for p in payments)
+        conn.close()
+    except Exception as e:
+        print(f"DB error (dashboard): {e}")
+    return jsonify({"stats": stats, "proposals": proposals, "signatures": signatures, "payments": payments})
+
 # ─── Catch-all for React SPA ───
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
