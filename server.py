@@ -430,6 +430,83 @@ def send_proposal(pid):
             f'<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A"><div style="background:#1B2A4A;padding:16px 20px;text-align:center"><span style="color:#fff;font-size:16px;font-weight:700">RE<span style="color:#E8943A">DRY</span></span></div><div style="padding:20px;background:#fff;border:1px solid #e2e8f0"><p style="font-size:14px;color:#374151"><strong>Proposal sent</strong> to {to_email}</p><p style="font-size:13px;color:#64748b">{project} | {company} | {fc(grand_total)}</p><a href="{proposal_url}" style="font-size:13px;color:#E8943A">View proposal</a></div></div>')
     return jsonify({"sent": success, "to": to_email})
 
+# ─── Send Proposal for Approval ───
+@app.route("/api/proposal/<pid>/send-for-approval", methods=["POST"])
+@require_auth
+def send_for_approval(pid):
+    p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
+    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
+    with open(p) as f: cfg = json.load(f)
+    company = cfg.get("clientCompany", "Client")
+    project = cfg.get("projectName", "Project")
+    address = cfg.get("projectAddress", "")
+    section = cfg.get("projectSection", "")
+    contact = cfg.get("clientContact", "")
+    client_email = cfg.get("clientEmail", "")
+    base_url = request.host_url.rstrip("/")
+    proposal_url = f"{base_url}/proposal/{pid}"
+
+    # Calculate pricing for summary
+    wet_sf = float(cfg.get("wetSF", 0) or 0)
+    rate = float(cfg.get("ratePSF", 2.0) or 2.0)
+    vent_total = wet_sf * rate
+    tax_rate_val = float(cfg.get("taxRateOverride", "") or cfg.get("taxRate", "") or 0)
+    tax_amount = round(vent_total * tax_rate_val, 2)
+    subtotal = round(vent_total + tax_amount, 2)
+    scan_cost = float(cfg.get("scanCost", 4500) or 4500)
+    num_scans = int(cfg.get("numScans", 4) or 4)
+    waive_scans = cfg.get("waiveScans", False)
+    total_scans = 0 if waive_scans else round(scan_cost * num_scans, 2)
+    grand_total = round(subtotal + total_scans, 2)
+    def fc(v): return f"${v:,.2f}"
+
+    subject = f"APPROVAL REQUESTED: {company} | {address}"
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
+      <div style="background:#1B2A4A;padding:20px;text-align:center">
+        <span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:1px">RE<span style="color:#E8943A">DRY</span></span>
+      </div>
+      <div style="padding:28px;background:#fff;border:1px solid #e2e8f0">
+        <div style="padding:12px 16px;background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;margin-bottom:20px">
+          <p style="font-size:14px;font-weight:700;color:#92400E;margin:0">&#9888; Approval Requested</p>
+          <p style="font-size:13px;color:#92400E;margin:4px 0 0 0">A team member has submitted this proposal for your review and approval before sending to the client.</p>
+        </div>
+
+        <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
+          <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Proposal Details</p>
+          <table style="width:100%;border-collapse:collapse;font-size:13px;line-height:1.8">
+            <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Contractor:</td><td style="color:#1B2A4A;font-weight:600">{company}</td></tr>
+            {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Contact:</td><td style="color:#1B2A4A">{contact}</td></tr>' if contact else ''}
+            {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Email:</td><td style="color:#1B2A4A">{client_email}</td></tr>' if client_email else ''}
+            <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Project:</td><td style="color:#1B2A4A;font-weight:600">{project}{f' - {section}' if section else ''}</td></tr>
+            <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Address:</td><td style="color:#1B2A4A">{address}</td></tr>
+          </table>
+        </div>
+
+        <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
+          <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Pricing Summary</p>
+          <table style="width:100%;border-collapse:collapse">
+            <tr><td style="padding:4px 12px;font-size:13px;color:#374151">ReDry Vent System ({wet_sf:,.0f} SF @ {fc(rate)}/SF)</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(vent_total)}</td></tr>
+            {f'<tr><td style="padding:4px 12px;font-size:13px;color:#374151">Tax ({tax_rate_val*100:.2f}%)</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(tax_amount)}</td></tr>' if tax_amount > 0 else ''}
+            {f'<tr><td style="padding:4px 12px;font-size:13px;color:#374151">Monitoring ({num_scans} scans)</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(total_scans)}</td></tr>' if not waive_scans else ''}
+            <tr style="border-top:2px solid #1B2A4A"><td style="padding:10px 12px;font-size:15px;font-weight:800;color:#1B2A4A">Total</td><td style="padding:10px 12px;font-size:15px;font-weight:800;color:#1B2A4A;text-align:right">{fc(grand_total)}</td></tr>
+          </table>
+        </div>
+
+        <div style="margin:24px 0;text-align:center">
+          <a href="{proposal_url}" style="display:inline-block;background:#E8943A;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">Review Full Proposal</a>
+        </div>
+        <div style="margin:12px 0;text-align:center">
+          <a href="{base_url}/api/proposal/{pid}/pdf" style="font-size:13px;color:#E8943A;font-weight:600;text-decoration:none">Download PDF &#8594;</a>
+        </div>
+      </div>
+      <div style="padding:16px;text-align:center;font-size:11px;color:#94a3b8">ReDry, LLC | Advancing the Science of Moisture Removal</div>
+    </div>"""
+    success = send_email([ADMIN_EMAIL], subject, html)
+    if success:
+        db_log_event(pid, "approval_requested", {"to": ADMIN_EMAIL})
+    return jsonify({"sent": success, "to": ADMIN_EMAIL})
+
 # ─── Proposal Data & Assets ───
 @app.route("/api/proposal/<pid>")
 def get_proposal_config(pid):
