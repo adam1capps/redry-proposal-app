@@ -493,9 +493,18 @@ def send_for_approval(pid):
 # ─── Proposal Data & Assets ───
 @app.route("/api/proposal/<pid>")
 def get_proposal_config(pid):
+    cfg = None
     p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
-    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
-    with open(p) as f: cfg = json.load(f)
+    if os.path.exists(p):
+        with open(p) as f: cfg = json.load(f)
+    elif DATABASE_URL:
+        try:
+            conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT config FROM proposals WHERE id=%s", (pid,))
+            row = cur.fetchone(); conn.close()
+            if row: cfg = row["config"]
+        except Exception as e: print(f"DB error (get_proposal_config): {e}")
+    if not cfg: return jsonify({"error": "Not found"}), 404
     db_update_status(pid, "viewed", "viewed_at")
     db_log_event(pid, "viewed", {"ip": request.headers.get("X-Forwarded-For", request.remote_addr), "ua": request.headers.get("User-Agent", "")[:200]})
     return jsonify(cfg)
