@@ -161,8 +161,12 @@ const defaultForm = {
   projectName:"", projectAddress:"", projectCity:"", projectState:"", projectZip:"",
   projectSection:"", wetSF:"", ratePSF:"2.00", scanCost:"4500", numScans:"4",
   scanInterval:"3", totalVents:"", proposalDate: new Date().toISOString().split("T")[0], validDays:"30",
-  taxRate:"", taxRateOverride:"", waiveScans: false,
-  showOption0: false, showOption1: true, showOption2: false
+  taxRate:"", taxRateOverride:"", waiveScans: false, hideScans: false, hidePricing: false,
+  showOption0: false, showOption1: true, showOption2: false,
+  showCustomOption: false,
+  customOptionLabel: "",
+  customOptionAdj: "0",
+  customOptionPayments: [{ pct:"100", label:"Full Payment", due:"Due upon contract execution" }]
 };
 
 // ─── localStorage helpers ───
@@ -189,11 +193,16 @@ function calcOptions(form, taxRate) {
     const payments = splits.map(s => ({...s, amount: round2(total * s.pct), amountNoAch: round2(totalNoAch * s.pct)}));
     return { label, adj, adjusted, tax, achDiscount, total, totalNoAch, payments, scanValue, ventBase };
   };
-  return [
+  const opts = [
     build("Pay in Full", -0.03, [{ pct:1.0, label:"Full Payment", due:"Due upon contract execution" }]),
     build("50% Now. 50% at Install.", 0, [{ pct:0.50, label:"Deposit (50%)", due:"Due upon contract execution" },{ pct:0.50, label:"Balance (50%)", due:"Due upon ReDry vent installation" }]),
     build("Let\u2019s Get Going!", 0.03, [{ pct:0.10, label:"Deposit (10%)", due:"Due upon contract execution \u2014 2-Way Vents ship immediately" },{ pct:0.40, label:"Install Payment (40%)", due:"Due when ready for install \u2014 ReDry vent install scheduled 3 weeks out" },{ pct:0.50, label:"Final Payment (50%)", due:"Due upon ReDry vent installation" }]),
   ];
+  // Custom option (index 3)
+  const customPmts = (form.customOptionPayments || []).map(p => ({ pct: (parseFloat(p.pct)||0)/100, label: p.label||"Payment", due: p.due||"" }));
+  const customAdj = (parseFloat(form.customOptionAdj)||0)/100;
+  opts.push(build(form.customOptionLabel || "Custom", customAdj, customPmts.length > 0 ? customPmts : [{ pct:1.0, label:"Full Payment", due:"" }]));
+  return opts;
 }
 
 function Inp({label,value,onChange,type="text",placeholder,prefix,suffix,half,third,required,disabled,autoComplete}) {
@@ -371,20 +380,30 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
             <span style={{padding:"8px 12px 8px 0",color:C.gray,fontSize:13}}>%</span>
           </div>
         </div>
-        <div style={{flex:"0 0 31%",minWidth:140,display:"flex",alignItems:"center",height:40,paddingBottom:2}}>
+        <div style={{flex:"0 0 31%",minWidth:140,display:"flex",flexDirection:"column",gap:6,paddingBottom:2}}>
           <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy}}>
             <input type="checkbox" checked={form.waiveScans} onChange={e=>setForm(f=>({...f,waiveScans:e.target.checked}))}
               style={{width:18,height:18,accentColor:C.orange,cursor:"pointer"}}/>
             Waive scan fees (added value)
           </label>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy}}>
+            <input type="checkbox" checked={form.hideScans} onChange={e=>setForm(f=>({...f,hideScans:e.target.checked}))}
+              style={{width:18,height:18,accentColor:C.orange,cursor:"pointer"}}/>
+            Hide scans from proposal
+          </label>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy}}>
+            <input type="checkbox" checked={form.hidePricing} onChange={e=>setForm(f=>({...f,hidePricing:e.target.checked}))}
+              style={{width:18,height:18,accentColor:C.orange,cursor:"pointer"}}/>
+            Hide all pricing (complimentary)
+          </label>
         </div>
       </div>
 
-      {wetSF>0 && <div style={{marginTop:20}}>
+      {wetSF>0 && !form.hidePricing && <div style={{marginTop:20}}>
         <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Payment Options</div>
 
         {/* Option toggles */}
-        <div style={{display:"flex",gap:16,marginBottom:14,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:16,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
           {["Pay in Full","50% Now. 50% at Install.","Let\u2019s Get Going!"].map((name,i)=>(
             <label key={i} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:600,color:!!form[`showOption${i}`]?C.navy:C.gray}}>
               <input type="checkbox" checked={!!form[`showOption${i}`]} onChange={e=>setForm(f=>({...f,[`showOption${i}`]:e.target.checked}))}
@@ -392,25 +411,69 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
               {name}
             </label>
           ))}
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:600,color:form.showCustomOption?C.orange:C.gray}}>
+            <input type="checkbox" checked={!!form.showCustomOption} onChange={e=>setForm(f=>({...f,showCustomOption:e.target.checked}))}
+              style={{width:16,height:16,accentColor:C.orange,cursor:"pointer"}}/>
+            Custom
+          </label>
         </div>
+
+        {/* Custom option builder */}
+        {form.showCustomOption && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:14}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.orange,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Custom Payment Option</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:12}}>
+            <Inp label="Option Label" value={form.customOptionLabel} onChange={v=>setForm(f=>({...f,customOptionLabel:v}))} placeholder="e.g. Net 30" half/>
+            <Inp label="Price Adjustment" value={form.customOptionAdj} onChange={v=>setForm(f=>({...f,customOptionAdj:v}))} suffix="%" type="number" half placeholder="0 = standard, -3 = discount, 3 = fee"/>
+          </div>
+          <div style={{fontSize:12,fontWeight:600,color:C.navy,marginBottom:8}}>Payment Schedule</div>
+          {(form.customOptionPayments||[]).map((pmt,pi)=>(
+            <div key={pi} style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-end"}}>
+              <div style={{flex:"0 0 70px"}}>
+                <label style={{display:"block",fontSize:11,fontWeight:600,color:C.navy,marginBottom:2}}>Split %</label>
+                <input type="number" value={pmt.pct} onChange={e=>{const ps=[...(form.customOptionPayments||[])];ps[pi]={...ps[pi],pct:e.target.value};setForm(f=>({...f,customOptionPayments:ps}));}}
+                  style={{width:"100%",padding:"6px 8px",border:`1px solid ${C.border}`,borderRadius:4,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+              </div>
+              <div style={{flex:1}}>
+                <label style={{display:"block",fontSize:11,fontWeight:600,color:C.navy,marginBottom:2}}>Label</label>
+                <input value={pmt.label} onChange={e=>{const ps=[...(form.customOptionPayments||[])];ps[pi]={...ps[pi],label:e.target.value};setForm(f=>({...f,customOptionPayments:ps}));}}
+                  placeholder="e.g. Deposit (50%)" style={{width:"100%",padding:"6px 8px",border:`1px solid ${C.border}`,borderRadius:4,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+              </div>
+              <div style={{flex:1}}>
+                <label style={{display:"block",fontSize:11,fontWeight:600,color:C.navy,marginBottom:2}}>Due</label>
+                <input value={pmt.due} onChange={e=>{const ps=[...(form.customOptionPayments||[])];ps[pi]={...ps[pi],due:e.target.value};setForm(f=>({...f,customOptionPayments:ps}));}}
+                  placeholder="e.g. Due upon execution" style={{width:"100%",padding:"6px 8px",border:`1px solid ${C.border}`,borderRadius:4,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+              </div>
+              {(form.customOptionPayments||[]).length>1 && <button onClick={()=>{const ps=[...(form.customOptionPayments||[])];ps.splice(pi,1);setForm(f=>({...f,customOptionPayments:ps}));}}
+                style={{padding:"6px 10px",border:`1px solid ${C.red}`,borderRadius:4,background:"#fff",color:C.red,fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0,height:32}}>&#10005;</button>}
+            </div>
+          ))}
+          <div style={{display:"flex",gap:8,alignItems:"center",marginTop:4}}>
+            <button onClick={()=>setForm(f=>({...f,customOptionPayments:[...(f.customOptionPayments||[]),{pct:"",label:"",due:""}]}))}
+              style={{padding:"6px 14px",border:`1px solid ${C.orange}`,borderRadius:4,background:"#fff",color:C.orange,fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Add Payment</button>
+            <span style={{fontSize:11,color:C.gray}}>Total: {(form.customOptionPayments||[]).reduce((s,p)=>s+(parseFloat(p.pct)||0),0)}% (should equal 100%)</span>
+          </div>
+        </div>}
 
         {/* Shared pricing summary */}
         <div style={{background:"#f8fafc",borderRadius:8,padding:"12px 16px",marginBottom:12,fontSize:13,color:C.gray,lineHeight:1.7}}>
           <span style={{fontWeight:600,color:C.navy}}>Base:</span> {fmtN(wetSF)} SF &times; {fmtC(rate)}/SF = {fmtC(ventTotal)}
           {taxRate>0 && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.navy}}>Tax:</span> {fmtPct(taxRate)}</span>}
           {options[0].achDiscount>0 && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.green}}>$100 ACH discount</span> available</span>}
-          {form.waiveScans && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.green}}>{numScans} scans included</span> ({fmtC(scanCost*numScans)} value)</span>}
+          {form.waiveScans && !form.hideScans && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.green}}>{numScans} scans included</span> ({fmtC(scanCost*numScans)} value)</span>}
         </div>
 
         {/* Option cards */}
         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
           {options.map((opt,oi)=>{
-            if(!form[`showOption${oi}`]) return null;
+            if(oi<3 && !form[`showOption${oi}`]) return null;
+            if(oi===3 && !form.showCustomOption) return null;
+            const isCustom = oi===3;
             return (
-            <div key={oi} style={{flex:"1 1 220px",background:oi===1?"#fef7ed":"#f8fafc",border:`1px solid ${oi===1?C.orange:C.border}`,borderRadius:8,padding:14,position:"relative"}}>
+            <div key={oi} style={{flex:"1 1 220px",background:isCustom?"#fef7ed":oi===1?"#fef7ed":"#f8fafc",border:`1px solid ${isCustom||oi===1?C.orange:C.border}`,borderRadius:8,padding:14,position:"relative"}}>
               {oi===1 && <div style={{position:"absolute",top:-8,right:12,background:C.orange,color:"#fff",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4}}>DEFAULT</div>}
+              {isCustom && <div style={{position:"absolute",top:-8,right:12,background:C.orange,color:"#fff",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4}}>CUSTOM</div>}
               <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:6}}>{opt.label}</div>
-              {opt.adj!==0 && <div style={{fontSize:11,color:opt.adj<0?C.green:C.orange,marginBottom:6}}>{opt.adj<0?"3% discount applied":"3% convenience fee"}</div>}
+              {opt.adj!==0 && <div style={{fontSize:11,color:opt.adj<0?C.green:C.orange,marginBottom:6}}>{opt.adj<0?`${Math.abs(opt.adj*100)}% discount applied`:`${Math.abs(opt.adj*100)}% convenience fee`}</div>}
               <div style={{fontSize:20,fontWeight:800,color:C.navy,marginBottom:8}}>{fmtC(opt.total)}</div>
               {opt.payments.map((p,pi)=>(
                 <div key={pi} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderTop:pi===0?`1px solid ${C.border}`:"none",marginTop:pi===0?4:0}}>
@@ -559,7 +622,10 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   },[form.projectState]);
 
   const options = calcOptions(form, taxRate);
-  const visibleOptions = options.map((opt,oi)=>({opt,oi})).filter(({oi})=> form[`showOption${oi}`] === undefined || form[`showOption${oi}`] === true);
+  const visibleOptions = options.map((opt,oi)=>({opt,oi})).filter(({oi})=> {
+    if(oi===3) return !!form.showCustomOption;
+    return form[`showOption${oi}`] === undefined || form[`showOption${oi}`] === true;
+  });
 
   // Auto-select if only one option visible
   const visibleCount = visibleOptions.length;
@@ -696,30 +762,32 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
         <B html="Roof membrane repair, replacement, or coating (by others)."/>
         <B html="Structural deck repair or modification."/>
         <B html={`Any work beyond the ${form.projectSection||"designated"} boundary identified on the Placement Map.`}/>
-        {SH(3,"Pricing and Payment")}
-        <P>The vent system lease is based on <strong>{fmtN(wetSF)} square feet</strong> of identified wet insulation at <strong>{fmtC(rate)} per square foot</strong>.</P>
+        {!form.hidePricing && SH(3,"Pricing and Payment")}
+        {form.hidePricing && SH(3,"Project Details")}
+        {!form.hidePricing && <P>The vent system lease is based on <strong>{fmtN(wetSF)} square feet</strong> of identified wet insulation at <strong>{fmtC(rate)} per square foot</strong>.</P>}
+        {form.hidePricing && <P>This proposal covers the ReDry Vent System for <strong>{fmtN(wetSF)} square feet</strong> of identified wet insulation. The vent system is provided at <strong>no charge</strong> as a complimentary service.</P>}
 
         {/* Shared pricing details - show once */}
-        <div style={{background:"#f8fafc",borderRadius:8,padding:"14px 18px",margin:"12px 0 8px",fontSize:13,lineHeight:1.8,color:"#374151"}}>
+        {!form.hidePricing && <div style={{background:"#f8fafc",borderRadius:8,padding:"14px 18px",margin:"12px 0 8px",fontSize:13,lineHeight:1.8,color:"#374151"}}>
           <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Vent Lease:</span> {fmtC(ventTotal)}</div>
           {taxRate>0 && <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Rental Tax:</span> {fmtPct(taxRate)} ({fmtC(round2(ventTotal*taxRate))})</div>}
-          {form.waiveScans && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>Included:</span> {numScans} moisture scans ({fmtC(scanCost*numScans)} value) at no additional charge</div>}
-          {!form.waiveScans && <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Scans:</span> {numScans} scans invoiced separately at {fmtC(scanCost)} each</div>}
+          {!form.hideScans && form.waiveScans && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>Included:</span> {numScans} moisture scans ({fmtC(scanCost*numScans)} value) at no additional charge</div>}
+          {!form.hideScans && !form.waiveScans && <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Scans:</span> {numScans} scans invoiced separately at {fmtC(scanCost)} each</div>}
           {visibleOptions.length>0 && visibleOptions[0].opt.achDiscount>0 && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>ACH Savings:</span> Save $100 when paying via bank transfer</div>}
-        </div>
+        </div>}
 
-        {visibleOptions.length > 1 && <P>Select a payment option below:</P>}
+        {!form.hidePricing && visibleOptions.length > 1 && <P>Select a payment option below:</P>}
 
-        <div style={{display:"flex",gap:16,marginTop:16,flexWrap:"wrap"}}>
+        {!form.hidePricing && <div style={{display:"flex",gap:16,marginTop:16,flexWrap:"wrap"}}>
           {visibleOptions.map(({opt,oi})=>{
             const sel = selectedOption===oi;
-            const tags = {0:{text:"BEST VALUE",bg:C.green}, 1:{text:"MOST POPULAR",bg:C.navy}, 2:{text:"EASY START",bg:C.orange}};
+            const tags = {0:{text:"BEST VALUE",bg:C.green}, 1:{text:"MOST POPULAR",bg:C.navy}, 2:{text:"EASY START",bg:C.orange}, 3:{text:"CUSTOM",bg:C.orange}};
             const tag = tags[oi];
             return (
             <div key={oi} onClick={()=>setSelectedOption(oi)} style={{flex:"1 1 240px",background:sel?"#fef7ed":"#fff",border:`2px solid ${sel?C.orange:C.border}`,borderRadius:10,padding:"20px 18px",cursor:"pointer",position:"relative",transition:"all 0.2s"}}>
               {tag && <div style={{position:"absolute",top:-10,right:12,background:tag.bg,color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:4}}>{tag.text}</div>}
               <div style={{fontSize:16,fontWeight:700,color:C.navy,marginBottom:4}}>{opt.label}</div>
-              {opt.adj!==0 && <div style={{fontSize:12,color:opt.adj<0?C.green:C.orange,marginBottom:8}}>{opt.adj<0?"3% discount for paying in full":"3% convenience fee applies"}</div>}
+              {opt.adj!==0 && <div style={{fontSize:12,color:opt.adj<0?C.green:C.orange,marginBottom:8}}>{opt.adj<0?`${Math.abs(opt.adj*100)}% discount for paying in full`:`${Math.abs(opt.adj*100)}% convenience fee applies`}</div>}
               {opt.adj===0 && <div style={{fontSize:12,color:C.gray,marginBottom:8}}>Standard pricing</div>}
               <div style={{fontSize:24,fontWeight:800,color:C.navy,marginBottom:12}}>{fmtC(opt.total)}</div>
 
@@ -739,7 +807,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
               {sel && <div style={{marginTop:12,textAlign:"center"}}><span style={{display:"inline-block",background:C.orange,color:"#fff",padding:"5px 16px",borderRadius:4,fontSize:12,fontWeight:700}}>&#10003; SELECTED</span></div>}
             </div>
           );})}
-        </div>
+        </div>}
         {SH(4,"General Conditions")}
         {[["4.1 Relationship of Parties","ReDry is the manufacturer and lessor of the ReDry Vent System and is not a roofing contractor or subcontractor."],
           ["4.2 Roofing Contractor Responsibilities","The roofing contractor is solely responsible for installing and bonding the 2-Way Vents per the ReDry Installation Specification."],
@@ -757,13 +825,15 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
         <img src={ventMapUrl} alt="Vent Placement Map" style={{width:"100%",borderRadius:8,border:`1px solid ${C.border}`}}/>
       </div>}
       <div style={{background:"#fff",borderRadius:12,border:`2px solid ${C.orange}`,padding:"28px 32px"}}>
-        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Acceptance and Payment</h2>
+        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>{form.hidePricing ? "Acceptance" : "Acceptance and Payment"}</h2>
         <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
-        {selectedOption===null && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:16}}>
+        {!form.hidePricing && selectedOption===null && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:16}}>
           <div style={{fontSize:14,fontWeight:600,color:C.orange}}>Please select a payment option above to continue.</div>
         </div>}
-        {selectedOption!==null && <>
-          <P>By signing below, you accept this proposal under <strong>{options[selectedOption].label}</strong> and the terms described herein.</P>
+        {(form.hidePricing || selectedOption!==null) && <>
+          {form.hidePricing
+            ? <P>By signing below, you accept this complimentary proposal and the terms described herein.</P>
+            : <P>By signing below, you accept this proposal under <strong>{options[selectedOption].label}</strong> and the terms described herein.</P>}
           <div style={{display:"flex",gap:16,marginTop:20,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:200}}>
               <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Full Name / Title</label>
@@ -774,15 +844,15 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
               <input type="date" value={sigDate} onChange={e=>setSigDate(e.target.value)} style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
             </div>
           </div>
-          <div style={{marginTop:16,display:"flex",gap:8,alignItems:"center"}}>
+          {!form.hidePricing && <div style={{marginTop:16,display:"flex",gap:8,alignItems:"center"}}>
             <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Payment method:</span>
             <button onClick={()=>setPayingWith("card")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
             <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>
-              ACH / Bank Transfer {options[selectedOption].achDiscount>0 ? "(Save $100)" : ""}
+              ACH / Bank Transfer {options[selectedOption]?.achDiscount>0 ? "(Save $100)" : ""}
             </button>
-          </div>
+          </div>}
           <button onClick={doAccept} disabled={!sigName||!sigDate||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&!submitting?"pointer":"not-allowed"}}>
-            {submitting?"Submitting...":"Accept Proposal and Pay Deposit"}
+            {submitting?"Submitting...": form.hidePricing ? "Accept Proposal" : "Accept Proposal and Pay Deposit"}
           </button>
         </>}
       </div>
