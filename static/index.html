@@ -1075,7 +1075,7 @@ function App() {
   if(view==="client") return <ClientView form={form} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
   if(view==="dashboard") return (<div style={{padding:"40px 20px"}}><Dashboard onBack={()=>setView("form")}/></div>);
   if(view==="search") return (<div style={{padding:"40px 20px"}}><ProposalSearch onBack={()=>setView("form")} onLoad={(pid)=>{
-    fetch(`${API}/api/proposal/${pid}`).then(r=>r.json()).then(cfg=>{
+    authFetch(`${API}/api/proposal/${pid}`).then(r=>r.json()).then(cfg=>{
       const ventFile = cfg._ventMapFilename;
       delete cfg._ventMapFilename; delete cfg._createdAt;
       setForm(f=>({...f,...cfg}));
