@@ -159,18 +159,24 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
     scan_interval = config.get("scanInterval", "3")
     total_vents = config.get("totalVents", "")
     waive_scans = config.get("waiveScans", False)
-    
+    hide_scans = config.get("hideScans", False)
+    hide_pricing = config.get("hidePricing", False)
+
     # Tax rate
     tax_rate_val = 0
     try:
         tax_rate_val = float(config.get("taxRateOverride", "") or config.get("taxRate", "") or 0)
     except (ValueError, TypeError):
         pass
-    
+
     # Payment option visibility
     show_option_0 = config.get("showOption0", False)  # Pay in Full
     show_option_1 = config.get("showOption1", True)    # 50/50
     show_option_2 = config.get("showOption2", False)  # Easy Start
+    show_custom_option = config.get("showCustomOption", False)
+    custom_option_label = config.get("customOptionLabel", "Custom")
+    custom_option_adj = float(config.get("customOptionAdj", 0) or 0) / 100
+    custom_option_payments = config.get("customOptionPayments", [])
     
     # Proposal link for online acceptance
     proposal_id = config.get("_proposalId", "")
@@ -212,6 +218,15 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
     ez_deposit = round(ez_total * 0.10, 2)
     ez_install = round(ez_total * 0.40, 2)
     ez_final = round(ez_total - ez_deposit - ez_install, 2)
+
+    # Custom option calculations
+    custom_vent_adjusted = round(vent_system_total * (1 + custom_option_adj), 2)
+    custom_tax = round(custom_vent_adjusted * tax_rate_val, 2)
+    custom_total = round(custom_vent_adjusted + custom_tax, 2)
+    custom_pmts = []
+    for cp in custom_option_payments:
+        pct = float(cp.get("pct", 0) or 0) / 100
+        custom_pmts.append((cp.get("label", "Payment"), round(custom_total * pct, 2), cp.get("due", "")))
     
     proposal_date = datetime.strptime(proposal_date_str, "%Y-%m-%d")
     proposal_date_display = proposal_date.strftime("%B %d, %Y").replace(" 0", " ")
@@ -477,206 +492,237 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
 
     # ── 3. PRICING & PAYMENT OPTIONS ──
     story.append(PageBreak())
-    story.append(Paragraph("3. PRICING & PAYMENT OPTIONS", style_section_head))
-
-    # ── Project cost summary (compact) ──
-    story.append(Paragraph(
-        f"Roof MRI identified <b>{wet_sf:,} SF</b> of wet insulation in the {project_section} of "
-        f"{project_name}. Vent system lease: <b>{fmt_currency(rate_psf)}/SF</b>."
-        + (f" Rental tax: {tax_rate_val*100:.2f}%." if tax_rate_val > 0 else ""),
-        style_body
-    ))
-    story.append(Spacer(1, 4))
-
-    # Compact cost breakdown - single table
-    cost_rows = [
-        [Paragraph("ReDry 2-Way Vent System Lease", style_table_cell),
-         Paragraph(f"{wet_sf:,} SF × {fmt_currency(rate_psf)}", style_table_cell_right),
-         Paragraph(fmt_currency(vent_system_total), style_table_cell_bold_right)],
-    ]
-    if tax_rate_val > 0:
-        cost_rows.append([
-            Paragraph(f"Rental Tax ({tax_rate_val*100:.2f}%)", style_table_cell),
-            Paragraph("", style_table_cell_right),
-            Paragraph(fmt_currency(tax_amount), style_table_cell_bold_right)])
-
-    cost_rows.append([
-        Paragraph("VENT SYSTEM TOTAL", ParagraphStyle('TotalLabel', parent=style_table_cell_bold, textColor=WHITE)),
-        Paragraph("", style_table_cell_right),
-        Paragraph(fmt_currency(vent_subtotal), ParagraphStyle('TotalAmt', parent=style_table_cell_bold_right, textColor=WHITE))])
-
-    cost_table = Table(cost_rows, colWidths=[usable_width * 0.48, usable_width * 0.27, usable_width * 0.25])
-    cost_table.setStyle(TableStyle([
-        ('GRID', (0, 0), (-1, -2), 0.5, BORDER_GRAY),
-        ('BACKGROUND', (0, -1), (-1, -1), NAVY),
-        ('TEXTCOLOR', (0, -1), (-1, -1), WHITE),
-        ('ROWBACKGROUNDS', (0, 0), (-1, -2), [LIGHT_GRAY, WHITE]),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('LEFTPADDING', (0, 0), (-1, -1), 8),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-    ]))
-    story.append(cost_table)
-    story.append(Spacer(1, 4))
-
-    # Scan note (one line)
-    if waive_scans:
+    if hide_pricing:
+        story.append(Paragraph("3. PROJECT DETAILS", style_section_head))
         story.append(Paragraph(
-            f"\u2713 <b>Moisture Monitoring Included:</b> {num_scans} scans at {scan_interval}-month intervals "
-            f"at no additional charge ({fmt_currency(scan_cost * num_scans)} value).",
-            ParagraphStyle('ScanNote', parent=style_body, fontSize=9, textColor=HexColor("#228B22"))
+            f"Roof MRI identified <b>{wet_sf:,} SF</b> of wet insulation in the {project_section} of "
+            f"{project_name}. The ReDry Vent System is provided at no charge as a complimentary service.",
+            style_body
         ))
     else:
-        story.append(Paragraph(
-            f"<b>Moisture Monitoring:</b> {num_scans} scans at {scan_interval}-month intervals, "
-            f"invoiced separately at {fmt_currency(scan_cost)}/scan. Net 15 from report delivery.",
-            ParagraphStyle('ScanNote2', parent=style_body, fontSize=9)
-        ))
+        story.append(Paragraph("3. PRICING & PAYMENT OPTIONS", style_section_head))
+
+    if not hide_pricing:
+     # ── Project cost summary (compact) ──
+     story.append(Paragraph(
+         f"Roof MRI identified <b>{wet_sf:,} SF</b> of wet insulation in the {project_section} of "
+         f"{project_name}. Vent system lease: <b>{fmt_currency(rate_psf)}/SF</b>."
+         + (f" Rental tax: {tax_rate_val*100:.2f}%." if tax_rate_val > 0 else ""),
+         style_body
+     ))
+     story.append(Spacer(1, 4))
+
+     # Compact cost breakdown - single table
+     cost_rows = [
+         [Paragraph("ReDry 2-Way Vent System Lease", style_table_cell),
+          Paragraph(f"{wet_sf:,} SF × {fmt_currency(rate_psf)}", style_table_cell_right),
+          Paragraph(fmt_currency(vent_system_total), style_table_cell_bold_right)],
+     ]
+     if tax_rate_val > 0:
+         cost_rows.append([
+             Paragraph(f"Rental Tax ({tax_rate_val*100:.2f}%)", style_table_cell),
+             Paragraph("", style_table_cell_right),
+             Paragraph(fmt_currency(tax_amount), style_table_cell_bold_right)])
+
+     cost_rows.append([
+         Paragraph("VENT SYSTEM TOTAL", ParagraphStyle('TotalLabel', parent=style_table_cell_bold, textColor=WHITE)),
+         Paragraph("", style_table_cell_right),
+         Paragraph(fmt_currency(vent_subtotal), ParagraphStyle('TotalAmt', parent=style_table_cell_bold_right, textColor=WHITE))])
+
+     cost_table = Table(cost_rows, colWidths=[usable_width * 0.48, usable_width * 0.27, usable_width * 0.25])
+     cost_table.setStyle(TableStyle([
+         ('GRID', (0, 0), (-1, -2), 0.5, BORDER_GRAY),
+         ('BACKGROUND', (0, -1), (-1, -1), NAVY),
+         ('TEXTCOLOR', (0, -1), (-1, -1), WHITE),
+         ('ROWBACKGROUNDS', (0, 0), (-1, -2), [LIGHT_GRAY, WHITE]),
+         ('TOPPADDING', (0, 0), (-1, -1), 6),
+         ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+         ('LEFTPADDING', (0, 0), (-1, -1), 8),
+         ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+     ]))
+     story.append(cost_table)
+     story.append(Spacer(1, 4))
+
+    # Scan note (one line) - skip if scans are hidden
+    if not hide_scans:
+        if waive_scans:
+            story.append(Paragraph(
+                f"\u2713 <b>Moisture Monitoring Included:</b> {num_scans} scans at {scan_interval}-month intervals "
+                f"at no additional charge ({fmt_currency(scan_cost * num_scans)} value).",
+                ParagraphStyle('ScanNote', parent=style_body, fontSize=9, textColor=HexColor("#228B22"))
+            ))
+        else:
+            story.append(Paragraph(
+                f"<b>Moisture Monitoring:</b> {num_scans} scans at {scan_interval}-month intervals, "
+                f"invoiced separately at {fmt_currency(scan_cost)}/scan. Net 15 from report delivery.",
+                ParagraphStyle('ScanNote2', parent=style_body, fontSize=9)
+            ))
     story.append(Spacer(1, 10))
 
-    # ── Payment Options Grid ──
-    story.append(Paragraph("CHOOSE YOUR PAYMENT OPTION", ParagraphStyle('PayHead', parent=style_section_head, fontSize=11, spaceBefore=0, spaceAfter=4)))
+    # ── Payment Options Grid (skip if pricing hidden) ──
+    if hide_pricing:
+        story.append(Paragraph(
+            "This vent system is provided at <b>no charge</b> as a complimentary service.",
+            ParagraphStyle('Complimentary', parent=style_body, fontSize=10, textColor=HexColor("#228B22"))
+        ))
+        story.append(Spacer(1, 10))
 
-    # Styles for grid cells
-    opt_head = ParagraphStyle('OH', fontName='Helvetica-Bold', fontSize=10, leading=13, textColor=WHITE, alignment=TA_CENTER)
-    opt_price = ParagraphStyle('OP', fontName='Helvetica-Bold', fontSize=16, leading=20, textColor=NAVY, alignment=TA_CENTER)
-    opt_desc = ParagraphStyle('OD', fontName='Helvetica', fontSize=8, leading=10, textColor=MED_GRAY, alignment=TA_CENTER)
-    opt_label = ParagraphStyle('OL', fontName='Helvetica', fontSize=8.5, leading=11, textColor=DARK_GRAY)
-    opt_amt = ParagraphStyle('OA', fontName='Helvetica-Bold', fontSize=8.5, leading=11, textColor=DARK_GRAY, alignment=TA_RIGHT)
-    opt_when = ParagraphStyle('OW', fontName='Helvetica', fontSize=7.5, leading=10, textColor=MED_GRAY)
+    if not hide_pricing:
+     story.append(Paragraph("CHOOSE YOUR PAYMENT OPTION", ParagraphStyle('PayHead', parent=style_section_head, fontSize=11, spaceBefore=0, spaceAfter=4)))
 
-    # Build columns for visible options
-    visible = []
-    if show_option_0:
-        visible.append({
-            "name": "Pay in Full",
-            "total": pf_total,
-            "tag": f"Save {fmt_currency(pf_savings)} (3% discount)",
-            "tag_color": HexColor("#228B22"),
-            "payments": [
-                ("Full Payment", pf_total, "Due upon contract execution"),
-            ]
-        })
-    if show_option_1:
-        visible.append({
-            "name": "50/50",
-            "total": std_total,
-            "tag": "Standard terms",
-            "tag_color": MED_GRAY,
-            "payments": [
-                ("Deposit (50%)", std_deposit, "Due upon contract execution"),
-                ("Balance (50%)", std_balance, "Due at vent installation"),
-            ]
-        })
-    if show_option_2:
-        visible.append({
-            "name": "Let\u2019s Get Going!",
-            "total": ez_total,
-            "tag": "Lowest deposit \u2022 3% convenience fee",
-            "tag_color": MED_GRAY,
-            "payments": [
-                ("Deposit (10%)", ez_deposit, "Due upon contract execution"),
-                ("Install Pmt (40%)", ez_install, "Due when ready for install"),
-                ("Final Pmt (50%)", ez_final, "Due at vent installation"),
-            ]
-        })
+     # Styles for grid cells
+     opt_head = ParagraphStyle('OH', fontName='Helvetica-Bold', fontSize=10, leading=13, textColor=WHITE, alignment=TA_CENTER)
+     opt_price = ParagraphStyle('OP', fontName='Helvetica-Bold', fontSize=16, leading=20, textColor=NAVY, alignment=TA_CENTER)
+     opt_desc = ParagraphStyle('OD', fontName='Helvetica', fontSize=8, leading=10, textColor=MED_GRAY, alignment=TA_CENTER)
+     opt_label = ParagraphStyle('OL', fontName='Helvetica', fontSize=8.5, leading=11, textColor=DARK_GRAY)
+     opt_amt = ParagraphStyle('OA', fontName='Helvetica-Bold', fontSize=8.5, leading=11, textColor=DARK_GRAY, alignment=TA_RIGHT)
+     opt_when = ParagraphStyle('OW', fontName='Helvetica', fontSize=7.5, leading=10, textColor=MED_GRAY)
 
-    if len(visible) == 0:
-        visible.append({"name": "50/50", "total": std_total, "tag": "Standard terms",
-                         "tag_color": MED_GRAY, "payments": [
-                             ("Deposit (50%)", std_deposit, "Due upon contract execution"),
-                             ("Balance (50%)", std_balance, "Due at vent installation")]})
+     # Build columns for visible options
+     visible = []
+     if show_option_0:
+         visible.append({
+             "name": "Pay in Full",
+             "total": pf_total,
+             "tag": f"Save {fmt_currency(pf_savings)} (3% discount)",
+             "tag_color": HexColor("#228B22"),
+             "payments": [
+                 ("Full Payment", pf_total, "Due upon contract execution"),
+             ]
+         })
+     if show_option_1:
+         visible.append({
+             "name": "50/50",
+             "total": std_total,
+             "tag": "Standard terms",
+             "tag_color": MED_GRAY,
+             "payments": [
+                 ("Deposit (50%)", std_deposit, "Due upon contract execution"),
+                 ("Balance (50%)", std_balance, "Due at vent installation"),
+             ]
+         })
+     if show_option_2:
+         visible.append({
+             "name": "Let\u2019s Get Going!",
+             "total": ez_total,
+             "tag": "Lowest deposit \u2022 3% convenience fee",
+             "tag_color": MED_GRAY,
+             "payments": [
+                 ("Deposit (10%)", ez_deposit, "Due upon contract execution"),
+                 ("Install Pmt (40%)", ez_install, "Due when ready for install"),
+                 ("Final Pmt (50%)", ez_final, "Due at vent installation"),
+             ]
+         })
+     if show_custom_option and custom_pmts:
+         custom_tag = "Custom terms"
+         if custom_option_adj < 0:
+             custom_tag = f"{abs(custom_option_adj*100):.0f}% discount"
+         elif custom_option_adj > 0:
+             custom_tag = f"{abs(custom_option_adj*100):.0f}% convenience fee"
+         visible.append({
+             "name": custom_option_label or "Custom",
+             "total": custom_total,
+             "tag": custom_tag,
+             "tag_color": HexColor("#228B22") if custom_option_adj < 0 else MED_GRAY,
+             "payments": custom_pmts
+         })
 
-    n_opts = len(visible)
-    # Calculate column widths
-    col_w = usable_width / n_opts
+     if len(visible) == 0:
+         visible.append({"name": "50/50", "total": std_total, "tag": "Standard terms",
+                          "tag_color": MED_GRAY, "payments": [
+                              ("Deposit (50%)", std_deposit, "Due upon contract execution"),
+                              ("Balance (50%)", std_balance, "Due at vent installation")]})
 
-    # Build the grid as a single table with merged-feel rows
-    # Row 0: Option names (navy header)
-    row_header = [Paragraph(v["name"], opt_head) for v in visible]
-    # Row 1: Total price
-    row_price = [Paragraph(fmt_currency(v["total"]), opt_price) for v in visible]
-    # Row 2: Tag line
-    row_tag = [Paragraph(v["tag"], ParagraphStyle('OTag', parent=opt_desc, textColor=v["tag_color"])) for v in visible]
+     n_opts = len(visible)
+     # Calculate column widths
+     col_w = usable_width / n_opts
 
-    # Row 3+: Payment schedule rows - need to normalize to max number of payments
-    max_pmts = max(len(v["payments"]) for v in visible)
+     # Build the grid as a single table with merged-feel rows
+     # Row 0: Option names (navy header)
+     row_header = [Paragraph(v["name"], opt_head) for v in visible]
+     # Row 1: Total price
+     row_price = [Paragraph(fmt_currency(v["total"]), opt_price) for v in visible]
+     # Row 2: Tag line
+     row_tag = [Paragraph(v["tag"], ParagraphStyle('OTag', parent=opt_desc, textColor=v["tag_color"])) for v in visible]
 
-    schedule_rows = []
-    for p_idx in range(max_pmts):
-        row_lbl = []
-        row_amt_val = []
-        row_due = []
-        for v in visible:
-            if p_idx < len(v["payments"]):
-                lbl, amt, due = v["payments"][p_idx]
-                row_lbl.append(Paragraph(lbl, opt_label))
-                row_amt_val.append(Paragraph(fmt_currency(amt), opt_amt))
-                row_due.append(Paragraph(due, opt_when))
-            else:
-                row_lbl.append(Paragraph("", opt_label))
-                row_amt_val.append(Paragraph("", opt_amt))
-                row_due.append(Paragraph("", opt_when))
-        schedule_rows.append(row_lbl)
-        schedule_rows.append(row_amt_val)
-        schedule_rows.append(row_due)
+     # Row 3+: Payment schedule rows - need to normalize to max number of payments
+     max_pmts = max(len(v["payments"]) for v in visible)
 
-    all_rows = [row_header, row_price, row_tag] + schedule_rows
-    col_widths = [col_w] * n_opts
+     schedule_rows = []
+     for p_idx in range(max_pmts):
+         row_lbl = []
+         row_amt_val = []
+         row_due = []
+         for v in visible:
+             if p_idx < len(v["payments"]):
+                 lbl, amt, due = v["payments"][p_idx]
+                 row_lbl.append(Paragraph(lbl, opt_label))
+                 row_amt_val.append(Paragraph(fmt_currency(amt), opt_amt))
+                 row_due.append(Paragraph(due, opt_when))
+             else:
+                 row_lbl.append(Paragraph("", opt_label))
+                 row_amt_val.append(Paragraph("", opt_amt))
+                 row_due.append(Paragraph("", opt_when))
+         schedule_rows.append(row_lbl)
+         schedule_rows.append(row_amt_val)
+         schedule_rows.append(row_due)
 
-    grid_table = Table(all_rows, colWidths=col_widths)
+     all_rows = [row_header, row_price, row_tag] + schedule_rows
+     col_widths = [col_w] * n_opts
 
-    grid_styles = [
-        # Header row
-        ('BACKGROUND', (0, 0), (-1, 0), NAVY),
-        ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
-        ('TOPPADDING', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-        # Price row
-        ('BACKGROUND', (0, 1), (-1, 1), LIGHT_GRAY),
-        ('TOPPADDING', (0, 1), (-1, 1), 10),
-        ('BOTTOMPADDING', (0, 1), (-1, 1), 4),
-        # Tag row
-        ('BACKGROUND', (0, 2), (-1, 2), LIGHT_GRAY),
-        ('TOPPADDING', (0, 2), (-1, 2), 0),
-        ('BOTTOMPADDING', (0, 2), (-1, 2), 8),
-        # All cells
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 8),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-        # Vertical dividers between options
-        ('LINEAFTER', (0, 0), (-2, -1), 1, BORDER_GRAY),
-        # Box around entire grid
-        ('BOX', (0, 0), (-1, -1), 1.5, NAVY),
-        # Line below tag row
-        ('LINEBELOW', (0, 2), (-1, 2), 1, BORDER_GRAY),
-    ]
+     grid_table = Table(all_rows, colWidths=col_widths)
 
-    # Style schedule rows: label, amount, due triplets
-    for p_idx in range(max_pmts):
-        base = 3 + (p_idx * 3)
-        # Label row
-        grid_styles.append(('TOPPADDING', (0, base), (-1, base), 8))
-        grid_styles.append(('BOTTOMPADDING', (0, base), (-1, base), 1))
-        # Amount row
-        grid_styles.append(('TOPPADDING', (0, base+1), (-1, base+1), 0))
-        grid_styles.append(('BOTTOMPADDING', (0, base+1), (-1, base+1), 1))
-        # Due row
-        grid_styles.append(('TOPPADDING', (0, base+2), (-1, base+2), 0))
-        grid_styles.append(('BOTTOMPADDING', (0, base+2), (-1, base+2), 6))
-        # Separator between payment groups (except last)
-        if p_idx < max_pmts - 1:
-            grid_styles.append(('LINEBELOW', (0, base+2), (-1, base+2), 0.5, BORDER_GRAY))
+     grid_styles = [
+         # Header row
+         ('BACKGROUND', (0, 0), (-1, 0), NAVY),
+         ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
+         ('TOPPADDING', (0, 0), (-1, 0), 10),
+         ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+         # Price row
+         ('BACKGROUND', (0, 1), (-1, 1), LIGHT_GRAY),
+         ('TOPPADDING', (0, 1), (-1, 1), 10),
+         ('BOTTOMPADDING', (0, 1), (-1, 1), 4),
+         # Tag row
+         ('BACKGROUND', (0, 2), (-1, 2), LIGHT_GRAY),
+         ('TOPPADDING', (0, 2), (-1, 2), 0),
+         ('BOTTOMPADDING', (0, 2), (-1, 2), 8),
+         # All cells
+         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+         ('LEFTPADDING', (0, 0), (-1, -1), 8),
+         ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+         # Vertical dividers between options
+         ('LINEAFTER', (0, 0), (-2, -1), 1, BORDER_GRAY),
+         # Box around entire grid
+         ('BOX', (0, 0), (-1, -1), 1.5, NAVY),
+         # Line below tag row
+         ('LINEBELOW', (0, 2), (-1, 2), 1, BORDER_GRAY),
+     ]
 
-    grid_table.setStyle(TableStyle(grid_styles))
-    story.append(grid_table)
-    story.append(Spacer(1, 8))
+     # Style schedule rows: label, amount, due triplets
+     for p_idx in range(max_pmts):
+         base = 3 + (p_idx * 3)
+         # Label row
+         grid_styles.append(('TOPPADDING', (0, base), (-1, base), 8))
+         grid_styles.append(('BOTTOMPADDING', (0, base), (-1, base), 1))
+         # Amount row
+         grid_styles.append(('TOPPADDING', (0, base+1), (-1, base+1), 0))
+         grid_styles.append(('BOTTOMPADDING', (0, base+1), (-1, base+1), 1))
+         # Due row
+         grid_styles.append(('TOPPADDING', (0, base+2), (-1, base+2), 0))
+         grid_styles.append(('BOTTOMPADDING', (0, base+2), (-1, base+2), 6))
+         # Separator between payment groups (except last)
+         if p_idx < max_pmts - 1:
+             grid_styles.append(('LINEBELOW', (0, base+2), (-1, base+2), 0.5, BORDER_GRAY))
 
-    story.append(Paragraph(
-        "Select your preferred option when accepting the proposal online. All payments are processed securely via Stripe.",
-        ParagraphStyle('PayFooter', parent=style_small, fontSize=8, alignment=TA_CENTER)
-    ))
+     grid_table.setStyle(TableStyle(grid_styles))
+     story.append(grid_table)
+     story.append(Spacer(1, 8))
+
+     story.append(Paragraph(
+         "Select your preferred option when accepting the proposal online. All payments are processed securely via Stripe.",
+         ParagraphStyle('PayFooter', parent=style_small, fontSize=8, alignment=TA_CENTER)
+     ))
 
     # ── 4. GENERAL CONDITIONS ──
     story.append(Paragraph("4. GENERAL CONDITIONS", style_section_head))
