@@ -249,6 +249,8 @@ function PHDTable({compact}) {
 // ─── BUILDER FORM ───
 function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,taxRate,setTaxRate,onSearch,onDashboard}) {
   const fileRef = useRef();
+  const resultRef = useRef();
+  useEffect(()=>{ if(result && resultRef.current) resultRef.current.scrollIntoView({behavior:"smooth",block:"nearest"}); },[result]);
   const [presets,setPresetsState] = useState(loadPresets());
   const [presetName,setPresetName] = useState("");
   const [showSavePreset,setShowSavePreset] = useState(false);
@@ -507,7 +509,7 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
       </button>
     </div>
 
-    {result && <div style={{marginTop:16,padding:16,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8}}>
+    {result && <div ref={resultRef} style={{marginTop:16,padding:16,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8}}>
       {result.type==="pdf" && <div style={{fontSize:14,color:"#15803d",fontWeight:600}}>&#10003; PDF downloaded successfully!</div>}
       {result.type==="link" && <div>
         <div style={{fontSize:14,color:"#15803d",fontWeight:600,marginBottom:8}}>&#10003; Client proposal link created!</div>
