@@ -186,12 +186,11 @@ function calcOptions(form, taxRate) {
   const build = (label, adj, splits) => {
     const adjusted = round2(ventBase * (1 + adj));
     const tax = round2(adjusted * tr);
-    const subtotalPreDiscount = adjusted + tax;
-    const achDiscount = subtotalPreDiscount >= 10000 ? 100 : 0;
-    const total = round2(subtotalPreDiscount - achDiscount);
-    const totalNoAch = round2(subtotalPreDiscount);
-    const payments = splits.map(s => ({...s, amount: round2(total * s.pct), amountNoAch: round2(totalNoAch * s.pct)}));
-    return { label, adj, adjusted, tax, achDiscount, total, totalNoAch, payments, scanValue, ventBase };
+    const total = round2(adjusted + tax);
+    const achEligible = total >= 10000;
+    const achTotal = achEligible ? round2(total - 100) : total;
+    const payments = splits.map(s => ({...s, amount: round2(total * s.pct), achAmount: round2(achTotal * s.pct)}));
+    return { label, adj, adjusted, tax, achEligible, total, achTotal, payments, scanValue, ventBase };
   };
   const opts = [
     build("Pay in Full", -0.03, [{ pct:1.0, label:"Full Payment", due:"Due upon contract execution" }]),
@@ -460,7 +459,7 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
         <div style={{background:"#f8fafc",borderRadius:8,padding:"12px 16px",marginBottom:12,fontSize:13,color:C.gray,lineHeight:1.7}}>
           <span style={{fontWeight:600,color:C.navy}}>Base:</span> {fmtN(wetSF)} SF &times; {fmtC(rate)}/SF = {fmtC(ventTotal)}
           {taxRate>0 && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.navy}}>Tax:</span> {fmtPct(taxRate)}</span>}
-          {options[0].achDiscount>0 && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.green}}>$100 ACH discount</span> available</span>}
+          {options[0].achEligible && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.green}}>$100 ACH discount</span> available</span>}
           {form.waiveScans && !form.hideScans && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.green}}>{numScans} scans included</span> ({fmtC(scanCost*numScans)} value)</span>}
         </div>
 
@@ -479,7 +478,7 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
               <div style={{fontSize:11,marginBottom:4}}>
                 <div style={{display:"flex",justifyContent:"space-between",color:C.gray}}><span>Vent Lease</span><span>{fmtC(opt.adjusted)}</span></div>
                 {opt.tax>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.gray}}><span>Tax ({fmtPct(taxRate)})</span><span>{fmtC(opt.tax)}</span></div>}
-                {opt.achDiscount>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.green}}><span>ACH Disc.</span><span>-{fmtC(opt.achDiscount)}</span></div>}
+{/* ACH discount not shown on proposal — applied at checkout only */}
               </div>
               <div style={{fontSize:20,fontWeight:800,color:C.navy,marginBottom:8,borderTop:`1px solid ${C.border}`,paddingTop:4}}>{fmtC(opt.total)}</div>
               {opt.payments.map((p,pi)=>(
@@ -654,7 +653,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   const doCheckout = async(optIndex, pmtIndex) => {
     const opt = options[optIndex]; const pmt = opt.payments[pmtIndex];
     const useAch = payingWith === "ach";
-    const amount = useAch ? pmt.amount : pmt.amountNoAch;
+    const amount = useAch ? pmt.achAmount : pmt.amount;
     setCheckoutLoading(true);
     try {
       const r = await fetch(`${API}/api/create-checkout`, {method:"POST", headers:{"Content-Type":"application/json"},
@@ -699,12 +698,12 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:12}}>
             <button onClick={()=>setPayingWith("card")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
             <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>
-              ACH / Bank Transfer {options[selectedOption].achDiscount>0 && "(Save $100)"}
+              ACH / Bank Transfer {options[selectedOption].achEligible && "(Save $100)"}
             </button>
           </div>
           <button onClick={()=>doCheckout(selectedOption, 0)} disabled={checkoutLoading}
             style={{padding:"14px 32px",border:"none",borderRadius:8,background:C.orange,color:"#fff",fontSize:15,fontWeight:700,cursor:checkoutLoading?"wait":"pointer"}}>
-            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? options[selectedOption].payments[0].amount : options[selectedOption].payments[0].amountNoAch)} Deposit`}
+            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? options[selectedOption].payments[0].achAmount : options[selectedOption].payments[0].amount)} Deposit`}
           </button>
         </div>}
       </div>
@@ -790,7 +789,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           {taxRate>0 && <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Rental Tax:</span> {fmtPct(taxRate)} ({fmtC(round2(ventTotal*taxRate))})</div>}
           {!form.hideScans && form.waiveScans && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>Included:</span> {numScans} moisture scans ({fmtC(scanCost*numScans)} value) at no additional charge</div>}
           {!form.hideScans && !form.waiveScans && <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Scans:</span> {numScans} scans invoiced separately at {fmtC(scanCost)} each</div>}
-          {visibleOptions.length>0 && visibleOptions[0].opt.achDiscount>0 && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>ACH Savings:</span> Save $100 when paying via bank transfer</div>}
+          {visibleOptions.length>0 && visibleOptions[0].opt.achEligible && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>ACH Savings:</span> Save $100 when paying via bank transfer</div>}
         </div>}
 
         {!form.hidePricing && visibleOptions.length > 1 && <P>Select a payment option below:</P>}
@@ -811,7 +810,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
               <div style={{fontSize:12,marginBottom:8}}>
                 <div style={{display:"flex",justifyContent:"space-between",color:C.gray,padding:"2px 0"}}><span>Vent Lease</span><span>{fmtC(opt.adjusted)}</span></div>
                 {opt.tax>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.gray,padding:"2px 0"}}><span>Rental Tax ({fmtPct(taxRate)})</span><span>{fmtC(opt.tax)}</span></div>}
-                {opt.achDiscount>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.green,padding:"2px 0"}}><span>ACH Discount</span><span>-{fmtC(opt.achDiscount)}</span></div>}
+{/* ACH discount not shown on proposal — applied at checkout only */}
               </div>
               <div style={{fontSize:24,fontWeight:800,color:C.navy,marginBottom:12,borderTop:`1px solid ${C.border}`,paddingTop:8}}>{fmtC(opt.total)}</div>
 
@@ -872,7 +871,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
             <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Payment method:</span>
             <button onClick={()=>setPayingWith("card")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
             <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>
-              ACH / Bank Transfer {options[selectedOption]?.achDiscount>0 ? "(Save $100)" : ""}
+              ACH / Bank Transfer {options[selectedOption]?.achEligible ? "(Save $100)" : ""}
             </button>
           </div>}
           <button onClick={doAccept} disabled={!sigName||!sigDate||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&!submitting?"pointer":"not-allowed"}}>
