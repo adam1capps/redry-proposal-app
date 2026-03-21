@@ -584,6 +584,8 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
          visible.append({
              "name": "Pay in Full",
              "total": pf_total,
+             "tax": pf_tax,
+             "adjusted": pf_vent_discounted,
              "tag": f"Save {fmt_currency(pf_savings)} (3% discount)",
              "tag_color": HexColor("#228B22"),
              "payments": [
@@ -594,6 +596,8 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
          visible.append({
              "name": "50/50",
              "total": std_total,
+             "tax": tax_amount,
+             "adjusted": vent_system_total,
              "tag": "Standard terms",
              "tag_color": MED_GRAY,
              "payments": [
@@ -605,6 +609,8 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
          visible.append({
              "name": "Let\u2019s Get Going!",
              "total": ez_total,
+             "tax": ez_tax,
+             "adjusted": ez_vent_adjusted,
              "tag": "Lowest deposit \u2022 3% convenience fee",
              "tag_color": MED_GRAY,
              "payments": [
@@ -622,13 +628,16 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
          visible.append({
              "name": custom_option_label or "Custom",
              "total": custom_total,
+             "tax": custom_tax,
+             "adjusted": custom_vent_adjusted,
              "tag": custom_tag,
              "tag_color": HexColor("#228B22") if custom_option_adj < 0 else MED_GRAY,
              "payments": custom_pmts
          })
 
      if len(visible) == 0:
-         visible.append({"name": "50/50", "total": std_total, "tag": "Standard terms",
+         visible.append({"name": "50/50", "total": std_total, "tax": tax_amount,
+                          "adjusted": vent_system_total, "tag": "Standard terms",
                           "tag_color": MED_GRAY, "payments": [
                               ("Deposit (50%)", std_deposit, "Due upon contract execution"),
                               ("Balance (50%)", std_balance, "Due at vent installation")]})
@@ -644,6 +653,18 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
      row_price = [Paragraph(fmt_currency(v["total"]), opt_price) for v in visible]
      # Row 2: Tag line
      row_tag = [Paragraph(v["tag"], ParagraphStyle('OTag', parent=opt_desc, textColor=v["tag_color"])) for v in visible]
+
+     # Itemized cost breakdown rows (vent lease + tax)
+     opt_item_label = ParagraphStyle('OIL', fontName='Helvetica', fontSize=8, leading=10, textColor=MED_GRAY)
+     opt_item_amt = ParagraphStyle('OIA', fontName='Helvetica', fontSize=8, leading=10, textColor=MED_GRAY, alignment=TA_RIGHT)
+     row_lease = []
+     row_tax = []
+     for v in visible:
+         row_lease.append(Paragraph(f"Vent Lease: {fmt_currency(v['adjusted'])}", opt_item_label))
+         if tax_rate_val > 0:
+             row_tax.append(Paragraph(f"Rental Tax ({tax_rate_val*100:.2f}%): {fmt_currency(v['tax'])}", opt_item_label))
+         else:
+             row_tax.append(Paragraph("", opt_item_label))
 
      # Row 3+: Payment schedule rows - need to normalize to max number of payments
      max_pmts = max(len(v["payments"]) for v in visible)
@@ -667,7 +688,10 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
          schedule_rows.append(row_amt_val)
          schedule_rows.append(row_due)
 
-     all_rows = [row_header, row_price, row_tag] + schedule_rows
+     cost_detail_rows = [row_lease]
+     if tax_rate_val > 0:
+         cost_detail_rows.append(row_tax)
+     all_rows = [row_header, row_price, row_tag] + cost_detail_rows + schedule_rows
      col_widths = [col_w] * n_opts
 
      grid_table = Table(all_rows, colWidths=col_widths)
@@ -699,9 +723,20 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
          ('LINEBELOW', (0, 2), (-1, 2), 1, BORDER_GRAY),
      ]
 
+     # Style cost detail rows (vent lease + tax, between tag and schedule)
+     n_detail = len(cost_detail_rows)
+     sched_start = 3 + n_detail
+     for di in range(n_detail):
+         r = 3 + di
+         grid_styles.append(('BACKGROUND', (0, r), (-1, r), LIGHT_GRAY))
+         grid_styles.append(('TOPPADDING', (0, r), (-1, r), 2))
+         grid_styles.append(('BOTTOMPADDING', (0, r), (-1, r), 2))
+     if n_detail > 0:
+         grid_styles.append(('LINEBELOW', (0, sched_start - 1), (-1, sched_start - 1), 1, BORDER_GRAY))
+
      # Style schedule rows: label, amount, due triplets
      for p_idx in range(max_pmts):
-         base = 3 + (p_idx * 3)
+         base = sched_start + (p_idx * 3)
          # Label row
          grid_styles.append(('TOPPADDING', (0, base), (-1, base), 8))
          grid_styles.append(('BOTTOMPADDING', (0, base), (-1, base), 1))

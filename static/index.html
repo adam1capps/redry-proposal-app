@@ -476,7 +476,12 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
               {isCustom && <div style={{position:"absolute",top:-8,right:12,background:C.orange,color:"#fff",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4}}>CUSTOM</div>}
               <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:6}}>{opt.label}</div>
               {opt.adj!==0 && <div style={{fontSize:11,color:opt.adj<0?C.green:C.orange,marginBottom:6}}>{opt.adj<0?`${Math.abs(opt.adj*100)}% discount applied`:`${Math.abs(opt.adj*100)}% convenience fee`}</div>}
-              <div style={{fontSize:20,fontWeight:800,color:C.navy,marginBottom:8}}>{fmtC(opt.total)}</div>
+              <div style={{fontSize:11,marginBottom:4}}>
+                <div style={{display:"flex",justifyContent:"space-between",color:C.gray}}><span>Vent Lease</span><span>{fmtC(opt.adjusted)}</span></div>
+                {opt.tax>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.gray}}><span>Tax ({fmtPct(taxRate)})</span><span>{fmtC(opt.tax)}</span></div>}
+                {opt.achDiscount>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.green}}><span>ACH Disc.</span><span>-{fmtC(opt.achDiscount)}</span></div>}
+              </div>
+              <div style={{fontSize:20,fontWeight:800,color:C.navy,marginBottom:8,borderTop:`1px solid ${C.border}`,paddingTop:4}}>{fmtC(opt.total)}</div>
               {opt.payments.map((p,pi)=>(
                 <div key={pi} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderTop:pi===0?`1px solid ${C.border}`:"none",marginTop:pi===0?4:0}}>
                   <span style={{color:C.gray}}>{p.label}</span>
@@ -801,7 +806,14 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
               <div style={{fontSize:16,fontWeight:700,color:C.navy,marginBottom:4}}>{opt.label}</div>
               {opt.adj!==0 && <div style={{fontSize:12,color:opt.adj<0?C.green:C.orange,marginBottom:8}}>{opt.adj<0?`${Math.abs(opt.adj*100)}% discount for paying in full`:`${Math.abs(opt.adj*100)}% convenience fee applies`}</div>}
               {opt.adj===0 && <div style={{fontSize:12,color:C.gray,marginBottom:8}}>Standard pricing</div>}
-              <div style={{fontSize:24,fontWeight:800,color:C.navy,marginBottom:12}}>{fmtC(opt.total)}</div>
+
+              {/* Itemized cost breakdown */}
+              <div style={{fontSize:12,marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",color:C.gray,padding:"2px 0"}}><span>Vent Lease</span><span>{fmtC(opt.adjusted)}</span></div>
+                {opt.tax>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.gray,padding:"2px 0"}}><span>Rental Tax ({fmtPct(taxRate)})</span><span>{fmtC(opt.tax)}</span></div>}
+                {opt.achDiscount>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.green,padding:"2px 0"}}><span>ACH Discount</span><span>-{fmtC(opt.achDiscount)}</span></div>}
+              </div>
+              <div style={{fontSize:24,fontWeight:800,color:C.navy,marginBottom:12,borderTop:`1px solid ${C.border}`,paddingTop:8}}>{fmtC(opt.total)}</div>
 
               {/* Payment schedule */}
               <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10}}>
