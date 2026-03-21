@@ -585,7 +585,15 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   const [selectedOption,setSelectedOption]=useState(null);
   const [payingWith,setPayingWith]=useState("card");
   const [checkoutLoading,setCheckoutLoading]=useState(false);
-  const [taxRate,setTaxRate]=useState(0);
+  // Use saved taxRate from proposal config (includes tax in client-facing prices)
+  const savedTaxRate = (() => {
+    const ov = parseFloat(form.taxRateOverride);
+    if(!isNaN(ov) && ov > 0) return ov / 100;
+    const saved = parseFloat(form.taxRate);
+    if(!isNaN(saved) && saved > 0) return saved;
+    return 0;
+  })();
+  const [taxRate,setTaxRate]=useState(savedTaxRate);
   const [paymentSuccess,setPaymentSuccess]=useState(false);
 
   const wetSF=parseFloat(form.wetSF)||0, rate=parseFloat(form.ratePSF)||0;
@@ -614,11 +622,13 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
     }
   },[]);
 
+  // If no saved taxRate, try to fetch from API (fallback for old proposals)
   useEffect(()=>{
+    if(savedTaxRate > 0) { setTaxRate(savedTaxRate); return; }
     const st = form.projectState?.toUpperCase().trim();
     if(st && st.length===2){
-      authFetch(`${API}/api/tax-rate?state=${st}`).then(r=>r.json()).then(d=>{
-        if(d.rate !== undefined) { const ov=parseFloat(form.taxRateOverride); setTaxRate(!isNaN(ov)?ov/100:d.rate); }
+      fetch(`${API}/api/tax-rate?state=${st}`).then(r=>{if(!r.ok)throw new Error();return r.json();}).then(d=>{
+        if(d.rate !== undefined) { const ov=parseFloat(form.taxRateOverride); setTaxRate(!isNaN(ov)&&ov>0?ov/100:d.rate); }
       }).catch(()=>{});
     }
   },[form.projectState]);
@@ -1118,7 +1128,7 @@ function App() {
     if(ventMapFile){const u=URL.createObjectURL(ventMapFile);setVentMapUrl(u);return()=>URL.revokeObjectURL(u);}
   },[ventMapFile]);
 
-  const buildFD=()=>{const fd=new FormData();fd.append("config",JSON.stringify(form));if(ventMapFile)fd.append("ventMap",ventMapFile);return fd;};
+  const buildFD=()=>{const fd=new FormData();const cfg={...form,taxRate:String(taxRate)};fd.append("config",JSON.stringify(cfg));if(ventMapFile)fd.append("ventMap",ventMapFile);return fd;};
 
   const doPDF=async()=>{
     setLoading("pdf");setResult(null);
