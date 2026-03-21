@@ -228,7 +228,6 @@ OPTION_LABELS = {1: "Pay in Full", 2: "50% Now. 50% at Install.", 3: "Let\u2019s
 
 # ─── API Routes ───
 @app.route("/api/tax-rate")
-@require_auth
 def get_tax_rate():
     state = request.args.get("state", "").upper().strip()
     rate = STATE_TAX_RATES.get(state, None)
@@ -820,6 +819,67 @@ def serve_react(path):
     if path and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
     return send_from_directory(app.static_folder, "index.html")
+
+# ─── Backfill taxRate into existing proposals ───
+def backfill_tax_rates():
+    """Add taxRate to any proposal config that doesn't have it, using the state tax rate lookup."""
+    updated = 0
+    for fname in os.listdir(PROPOSALS_DIR):
+        if not fname.endswith(".json") or "_accepted" in fname:
+            continue
+        fpath = os.path.join(PROPOSALS_DIR, fname)
+        try:
+            with open(fpath) as f:
+                cfg = json.load(f)
+            # Skip if taxRate already saved
+            existing = cfg.get("taxRate")
+            if existing and float(existing) > 0:
+                continue
+            # Look up rate from state
+            state = (cfg.get("projectState") or "").upper().strip()
+            override = cfg.get("taxRateOverride", "")
+            if override:
+                try:
+                    rate = float(override) / 100
+                except (ValueError, TypeError):
+                    rate = 0
+            elif state in STATE_TAX_RATES:
+                rate = STATE_TAX_RATES[state]
+            else:
+                rate = 0
+            if rate > 0:
+                cfg["taxRate"] = str(rate)
+                with open(fpath, "w") as f:
+                    json.dump(cfg, f)
+                # Also update config in database (preserve existing status)
+                pid = fname.replace(".json", "")
+                try:
+                    if DATABASE_URL:
+                        conn = get_db(); cur = conn.cursor()
+                        cur.execute("UPDATE proposals SET config=%s WHERE id=%s", (json.dumps(cfg), pid))
+                        conn.close()
+                except Exception:
+                    pass
+                updated += 1
+                print(f"  Backfilled taxRate={rate} for {fname} (state={state})")
+        except Exception as e:
+            print(f"  Error processing {fname}: {e}")
+    return updated
+
+@app.route("/api/admin/backfill-tax", methods=["POST"])
+@require_auth
+def admin_backfill_tax():
+    count = backfill_tax_rates()
+    return jsonify({"updated": count, "message": f"Backfilled tax rates for {count} proposals"})
+
+# Run backfill on startup
+with app.app_context():
+    print("Checking proposals for missing tax rates...")
+    n = backfill_tax_rates()
+    if n > 0:
+        print(f"Backfilled tax rates for {n} proposals.")
+    else:
+        print("All proposals have tax rates set.")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
