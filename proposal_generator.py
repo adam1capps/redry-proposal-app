@@ -1417,6 +1417,499 @@ def generate_client_pdf(config, logo_path=None, vent_map_path=None):
     return buf.read()
 
 
+def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
+    """
+    Generate a Fixed Lease proposal PDF.
+    Pricing: numVents x ventRate + installFee + tax.
+    """
+    client_company = config.get("clientCompany", "")
+    client_contact = config.get("clientContact", "")
+    client_title = config.get("clientTitle", "")
+    client_phone = config.get("clientPhone", "")
+    client_email = config.get("clientEmail", "")
+
+    project_name = config.get("projectName", "Project")
+    project_address = config.get("projectAddress", "")
+    project_city = config.get("projectCity", "")
+    project_state = config.get("projectState", "")
+    project_zip = config.get("projectZip", "")
+    project_section = config.get("projectSection", "")
+
+    num_vents = int(float(config.get("numVents", 0) or 0))
+    vent_rate = float(config.get("ventRate", 1000) or 1000)
+    lease_term = int(float(config.get("leaseTerm", 12) or 12))
+    install_fee = float(config.get("installFee", 0) or 0)
+
+    tax_rate_val = 0
+    try:
+        tax_rate_val = float(config.get("taxRateOverride", "") or config.get("taxRate", "") or 0)
+    except (ValueError, TypeError):
+        pass
+
+    show_option_0 = config.get("showOption0", False)
+    show_option_1 = config.get("showOption1", True)
+    show_option_2 = config.get("showOption2", False)
+    show_custom_option = config.get("showCustomOption", False)
+    custom_option_label = config.get("customOptionLabel", "Custom")
+    custom_option_adj = float(config.get("customOptionAdj", 0) or 0) / 100
+    custom_option_payments = config.get("customOptionPayments", [])
+
+    proposal_id = config.get("_proposalId", "")
+    proposal_date_str = config.get("proposalDate", datetime.now().strftime("%Y-%m-%d"))
+    valid_days = int(config.get("validDays", 30))
+
+    full_address_parts = [project_address]
+    city_state_zip = ", ".join(filter(None, [project_city, project_state]))
+    if project_zip:
+        city_state_zip += " " + project_zip if city_state_zip else project_zip
+    if city_state_zip:
+        full_address_parts.append(city_state_zip)
+    full_address = ", ".join(full_address_parts)
+
+    lease_total = num_vents * vent_rate
+    tax_amount = round(lease_total * tax_rate_val, 2)
+    subtotal = round(lease_total + tax_amount, 2)
+    grand_total = round(subtotal + install_fee, 2)
+
+    # Payment option calculations
+    pf_adjusted = round(lease_total * 0.97, 2)
+    pf_tax = round(pf_adjusted * tax_rate_val, 2)
+    pf_total = round(pf_adjusted + pf_tax + install_fee, 2)
+
+    std_total = grand_total
+    std_deposit = round(std_total / 2, 2)
+    std_balance = round(std_total - std_deposit, 2)
+
+    ez_adjusted = round(lease_total * 1.03, 2)
+    ez_tax = round(ez_adjusted * tax_rate_val, 2)
+    ez_total = round(ez_adjusted + ez_tax + install_fee, 2)
+    ez_deposit = round(ez_total * 0.10, 2)
+    ez_install = round(ez_total * 0.40, 2)
+    ez_final = round(ez_total - ez_deposit - ez_install, 2)
+
+    custom_adjusted = round(lease_total * (1 + custom_option_adj), 2)
+    custom_tax = round(custom_adjusted * tax_rate_val, 2)
+    custom_total = round(custom_adjusted + custom_tax + install_fee, 2)
+    custom_pmts = []
+    for cp in custom_option_payments:
+        pct = float(cp.get("pct", 0) or 0) / 100
+        custom_pmts.append((cp.get("label", "Payment"), round(custom_total * pct, 2), cp.get("due", "")))
+
+    proposal_date = datetime.strptime(proposal_date_str, "%Y-%m-%d")
+    proposal_date_display = proposal_date.strftime("%B %d, %Y").replace(" 0", " ")
+    valid_through_date = proposal_date + timedelta(days=valid_days)
+    valid_through = valid_through_date.strftime("%B %d, %Y").replace(" 0", " ")
+    mm = proposal_date.strftime("%m")
+    dd = proposal_date.strftime("%d")
+    proposal_num = f"P-{proposal_date.year}-{mm}{dd}"
+
+    to_lines = []
+    if client_company: to_lines.append(client_company)
+    if client_contact: to_lines.append(client_contact)
+    if client_title: to_lines.append(client_title)
+    if client_phone: to_lines.append(client_phone)
+    if client_email: to_lines.append(client_email)
+    to_text = "<br/>".join(to_lines) if to_lines else "[Client]"
+
+    buf = io.BytesIO()
+
+    class FixedDocTemplate(BaseDocTemplate):
+        def __init__(self, filename, **kwargs):
+            super().__init__(filename, **kwargs)
+            frame = Frame(MARGIN_L, MARGIN_B, PAGE_W - MARGIN_L - MARGIN_R, PAGE_H - MARGIN_T - MARGIN_B, id='normal')
+            template = PageTemplate(id='main', frames=frame, onPage=self._draw_page)
+            self.addPageTemplates([template])
+
+        def _draw_page(self, canvas_obj, doc):
+            canvas_obj.saveState()
+            canvas_obj.setStrokeColor(ORANGE)
+            canvas_obj.setLineWidth(3)
+            canvas_obj.line(0, PAGE_H - 4, PAGE_W, PAGE_H - 4)
+            if logo_path and os.path.exists(logo_path):
+                from PIL import Image as PILImage
+                img = PILImage.open(logo_path)
+                img_w, img_h = img.size
+                aspect = img_h / img_w
+                footer_logo_w = 0.7 * inch
+                footer_logo_h = footer_logo_w * aspect
+                canvas_obj.drawImage(logo_path, MARGIN_L, 0.28 * inch, width=footer_logo_w, height=footer_logo_h, mask='auto', preserveAspectRatio=True)
+            canvas_obj.setFont("Helvetica", 7.5)
+            canvas_obj.setFillColor(MED_GRAY)
+            canvas_obj.drawCentredString(PAGE_W / 2, 0.4 * inch, "ReDry, LLC  |  re-dry.com  |  info@re-dry.com  |  Confidential and Proprietary")
+            canvas_obj.drawRightString(PAGE_W - MARGIN_R, 0.4 * inch, f"Page {doc.page}")
+            canvas_obj.restoreState()
+
+    doc = FixedDocTemplate(buf, pagesize=letter, leftMargin=MARGIN_L, rightMargin=MARGIN_R, topMargin=MARGIN_T, bottomMargin=MARGIN_B, title=f"ReDry Fixed Lease - {project_name}", author="ReDry, LLC")
+    story = []
+    usable_width = PAGE_W - MARGIN_L - MARGIN_R
+
+    # Header
+    if logo_path and os.path.exists(logo_path):
+        from PIL import Image as PILImage
+        img = PILImage.open(logo_path)
+        img_w, img_h = img.size
+        aspect = img_h / img_w
+        logo_img = Image(logo_path, width=2.4 * inch, height=2.4 * inch * aspect)
+        header_data = [[logo_img, Paragraph(f"Proposal No: {proposal_num}<br/>Date: {proposal_date_display}<br/>Valid Through: {valid_through}", ParagraphStyle('HeaderRight', parent=style_small, alignment=TA_RIGHT, fontSize=9, leading=13, textColor=MED_GRAY))]]
+        header_table = Table(header_data, colWidths=[usable_width * 0.6, usable_width * 0.4])
+        header_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0)]))
+        story.append(header_table)
+        story.append(Spacer(1, 6))
+
+    story.append(Paragraph("FIXED LEASE PROPOSAL", style_title))
+    story.append(orange_rule())
+    story.append(Spacer(1, 4))
+
+    # FROM / TO
+    from_to_data = [
+        [Paragraph("FROM", style_label), Paragraph("TO", style_label), Paragraph("PROJECT", style_label)],
+        [Paragraph("ReDry, LLC<br/>Adam Capps, Founder<br/>865.771.3848<br/>adam@re-dry.com<br/>re-dry.com", ParagraphStyle('FromVal', parent=style_body, fontSize=9.5, leading=13, spaceAfter=0)),
+         Paragraph(to_text, ParagraphStyle('ToVal', parent=style_body, fontSize=9.5, leading=13, spaceAfter=0)),
+         Paragraph(f"<b>{project_name}</b><br/>{full_address}<br/>{project_section}<br/>Fixed Vent Lease", ParagraphStyle('ProjVal', parent=style_body, fontSize=9.5, leading=13, spaceAfter=0))]
+    ]
+    from_to_table = Table(from_to_data, colWidths=[usable_width * 0.33, usable_width * 0.33, usable_width * 0.34])
+    from_to_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0), ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 4)]))
+    story.append(from_to_table)
+    story.append(Spacer(1, 16))
+
+    # 1. Project Overview
+    story.append(Paragraph("1. Project Overview", style_section_head))
+    story.append(orange_rule())
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(f"ReDry, LLC is the manufacturer and lessor of the ReDry 2-Way Vent System, a proprietary solar-powered drying system designed to remove trapped moisture from commercial roof insulation without membrane removal or tear-off.", style_body))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(f"This proposal covers the fixed-term rental of <b>{num_vents} ReDry 2-Way Vent{'s' if num_vents != 1 else ''}</b> for the {project_section or 'designated area'} of {project_name}, located at {full_address}. The lease term is <b>{lease_term} month{'s' if lease_term != 1 else ''}</b> at a rate of <b>${vent_rate:,.2f} per vent</b>.", style_body))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph("The roofing contractor is responsible for installing the 2-Way Vents per the ReDry Installation Specification. Following installation, ReDry will attach its proprietary ReDry Vent heads, confirm proper placement, and conduct periodic inspections.", style_body))
+    story.append(Spacer(1, 12))
+
+    # 2. Scope of Work
+    story.append(Paragraph("2. Scope of Work", style_section_head))
+    story.append(orange_rule())
+    story.append(Spacer(1, 6))
+    bullets = [
+        f"ReDry will furnish <b>{num_vents}</b> ReDry 2-Way Vent{'s' if num_vents != 1 else ''} and ReDry Vent heads.",
+        "ReDry will provide the Installation Specification (SPEC-VENT-2026-01, Rev. A) and Placement Map to the roofing contractor.",
+        "The <b>roofing contractor</b> is solely responsible for installing and bonding the 2-Way Vents to the roof membrane per the Installation Specification.",
+        "Following installation, ReDry will attach the proprietary ReDry Vent heads and confirm proper positioning.",
+        "ReDry will complete photo documentation per specification requirements for warranty activation.",
+        f"Lease term: <b>{lease_term} month{'s' if lease_term != 1 else ''}</b> from date of installation.",
+        "Vents remain the property of ReDry, LLC and will be retrieved at the conclusion of the lease term or once performance criteria are met.",
+    ]
+    for b in bullets:
+        story.append(Paragraph(f"<font color='#E8943A'>•</font>&nbsp;&nbsp;{b}", style_body))
+        story.append(Spacer(1, 3))
+    story.append(Spacer(1, 12))
+
+    # 3. Pricing
+    story.append(Paragraph("3. Pricing and Payment Options", style_section_head))
+    story.append(orange_rule())
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(f"The vent rental is based on <b>{num_vents} vent{'s' if num_vents != 1 else ''}</b> at <b>${vent_rate:,.2f} per vent</b> for a <b>{lease_term}-month</b> lease term.", style_body))
+    story.append(Spacer(1, 8))
+
+    # Pricing table
+    pricing_data = [["Item", "Amount"]]
+    pricing_data.append([f"Vent Rental ({num_vents} × ${vent_rate:,.2f})", f"${lease_total:,.2f}"])
+    if tax_amount > 0:
+        pricing_data.append([f"Rental Tax ({tax_rate_val*100:.2f}%)", f"${tax_amount:,.2f}"])
+    if install_fee > 0:
+        pricing_data.append(["Install / Setup Fee", f"${install_fee:,.2f}"])
+    pricing_data.append(["Total", f"${grand_total:,.2f}"])
+
+    pricing_table = Table(pricing_data, colWidths=[usable_width * 0.65, usable_width * 0.35])
+    pricing_styles = [
+        ('BACKGROUND', (0, 0), (-1, 0), NAVY),
+        ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('LEADING', (0, 0), (-1, -1), 14),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 0.5, BORDER_GRAY),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('BACKGROUND', (0, -1), (-1, -1), LIGHT_GRAY),
+    ]
+    pricing_table.setStyle(TableStyle(pricing_styles))
+    story.append(pricing_table)
+    story.append(Spacer(1, 16))
+
+    # Payment options
+    visible_options = []
+    if show_option_0:
+        visible_options.append(("Pay in Full", f"${pf_total:,.2f}", "3% discount applied", [("Full Payment", f"${pf_total:,.2f}", "Due upon contract execution")]))
+    if show_option_1:
+        visible_options.append(("50% Now. 50% at Install.", f"${std_total:,.2f}", "Standard pricing", [("Deposit (50%)", f"${std_deposit:,.2f}", "Due upon contract execution"), ("Balance (50%)", f"${std_balance:,.2f}", "Due upon vent installation")]))
+    if show_option_2:
+        visible_options.append(("Easy Start", f"${ez_total:,.2f}", "3% convenience fee", [("Deposit (10%)", f"${ez_deposit:,.2f}", "Due upon contract execution"), ("Install (40%)", f"${ez_install:,.2f}", "Due when ready for install"), ("Final (50%)", f"${ez_final:,.2f}", "Due upon vent installation")]))
+    if show_custom_option and custom_pmts:
+        visible_options.append((custom_option_label, f"${custom_total:,.2f}", f"{abs(custom_option_adj)*100:.0f}% {'discount' if custom_option_adj < 0 else 'fee' if custom_option_adj > 0 else 'standard'}", [(l, f"${a:,.2f}", d) for l, a, d in custom_pmts]))
+
+    if visible_options:
+        story.append(Paragraph("<b>Payment Options</b>", style_body))
+        story.append(Spacer(1, 6))
+        for opt_name, opt_total, opt_note, opt_payments in visible_options:
+            story.append(Paragraph(f"<b>{opt_name}</b> — {opt_total} <font color='#666666' size='9'>({opt_note})</font>", style_body))
+            for pmt_label, pmt_amount, pmt_due in opt_payments:
+                story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;{pmt_label}: <b>{pmt_amount}</b> — <i>{pmt_due}</i>", ParagraphStyle('PmtLine', parent=style_body, fontSize=9.5, leading=13)))
+            story.append(Spacer(1, 8))
+
+    story.append(Spacer(1, 12))
+
+    # 4. General Conditions
+    story.append(Paragraph("4. General Conditions", style_section_head))
+    story.append(orange_rule())
+    story.append(Spacer(1, 6))
+    conditions = [
+        ("4.1 Relationship of Parties", "ReDry is the manufacturer and lessor of the ReDry Vent System and is not a roofing contractor or subcontractor."),
+        ("4.2 Roofing Contractor Responsibilities", "The roofing contractor is solely responsible for installing and bonding the 2-Way Vents per the ReDry Installation Specification."),
+        ("4.3 Installation Specification", "All work shall be performed per ReDry Vent System Installation Specification SPEC-VENT-2026-01 (Rev. A)."),
+        ("4.4 Equipment Ownership", "All ReDry Vent heads remain the sole property of ReDry, LLC throughout the lease period."),
+        ("4.5 Lease Term", f"The lease term is {lease_term} months from the date of installation. Vents will be retrieved at the conclusion of the lease term or upon meeting performance criteria."),
+        ("4.6 Access", "The client shall provide safe, unobstructed access to the roof area during commissioning and scheduled inspections."),
+        ("4.7 Proposal Validity", f"This proposal is valid for thirty (30) days from date of issue ({valid_through})."),
+    ]
+    for title, text in conditions:
+        story.append(Paragraph(f"<b>{title}.</b>&nbsp;&nbsp;{text}", style_body))
+        story.append(Spacer(1, 4))
+    story.append(Spacer(1, 12))
+
+    # 5. Acceptance
+    story.append(Paragraph("5. Acceptance", style_section_head))
+    story.append(orange_rule())
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("To accept this proposal, please review and sign at the link below:", style_body))
+    story.append(Spacer(1, 8))
+    if proposal_id:
+        story.append(Paragraph(f'<a href="https://proposals.re-dry.com/proposal/{proposal_id}" color="#E8943A"><b>View &amp; Accept Proposal Online</b></a>', style_body))
+    story.append(Spacer(1, 12))
+
+    # Vent map
+    if vent_map_path and os.path.exists(vent_map_path):
+        story.append(PageBreak())
+        story.append(Paragraph("Exhibit A: Vent Placement Map", style_section_head))
+        story.append(orange_rule())
+        story.append(Spacer(1, 8))
+        try:
+            from PIL import Image as PILImage
+            img = PILImage.open(vent_map_path)
+            img_w, img_h = img.size
+            aspect = img_h / img_w
+            max_w = usable_width
+            max_h = PAGE_H - MARGIN_T - MARGIN_B - 1.5 * inch
+            display_w = min(max_w, max_h / aspect) if aspect > 0 else max_w
+            display_h = display_w * aspect
+            map_img = Image(vent_map_path, width=display_w, height=display_h)
+            story.append(map_img)
+        except Exception:
+            story.append(Paragraph("[Vent placement map image]", style_body))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
+
+def generate_fixed_client_pdf(config, logo_path=None, vent_map_path=None):
+    """
+    Generate a client-facing Fixed Lease PDF without detailed pricing.
+    Focuses on building confidence in ReDry system.
+    """
+    client_company = config.get("clientCompany", "")
+    client_contact = config.get("clientContact", "")
+    client_title = config.get("clientTitle", "")
+    client_phone = config.get("clientPhone", "")
+    client_email = config.get("clientEmail", "")
+
+    project_name = config.get("projectName", "Project")
+    project_address = config.get("projectAddress", "")
+    project_city = config.get("projectCity", "")
+    project_state = config.get("projectState", "")
+    project_zip = config.get("projectZip", "")
+    project_section = config.get("projectSection", "")
+
+    num_vents = int(float(config.get("numVents", 0) or 0))
+    lease_term = int(float(config.get("leaseTerm", 12) or 12))
+
+    proposal_id = config.get("_proposalId", "")
+    proposal_date_str = config.get("proposalDate", datetime.now().strftime("%Y-%m-%d"))
+    valid_days = int(config.get("validDays", 30))
+
+    full_address_parts = [project_address]
+    city_state_zip = ", ".join(filter(None, [project_city, project_state]))
+    if project_zip:
+        city_state_zip += " " + project_zip if city_state_zip else project_zip
+    if city_state_zip:
+        full_address_parts.append(city_state_zip)
+    full_address = ", ".join(full_address_parts)
+
+    proposal_date = datetime.strptime(proposal_date_str, "%Y-%m-%d")
+    proposal_date_display = proposal_date.strftime("%B %d, %Y").replace(" 0", " ")
+    valid_through_date = proposal_date + timedelta(days=valid_days)
+    valid_through = valid_through_date.strftime("%B %d, %Y").replace(" 0", " ")
+    mm = proposal_date.strftime("%m")
+    dd = proposal_date.strftime("%d")
+    proposal_num = f"P-{proposal_date.year}-{mm}{dd}"
+
+    to_lines = []
+    if client_company: to_lines.append(client_company)
+    if client_contact: to_lines.append(client_contact)
+    if client_title: to_lines.append(client_title)
+    if client_phone: to_lines.append(client_phone)
+    if client_email: to_lines.append(client_email)
+    to_text = "<br/>".join(to_lines) if to_lines else "[Client]"
+
+    buf = io.BytesIO()
+
+    class FixedClientDocTemplate(BaseDocTemplate):
+        def __init__(self, filename, **kwargs):
+            super().__init__(filename, **kwargs)
+            frame = Frame(MARGIN_L, MARGIN_B, PAGE_W - MARGIN_L - MARGIN_R, PAGE_H - MARGIN_T - MARGIN_B, id='normal')
+            template = PageTemplate(id='main', frames=frame, onPage=self._draw_page)
+            self.addPageTemplates([template])
+
+        def _draw_page(self, canvas_obj, doc):
+            canvas_obj.saveState()
+            canvas_obj.setStrokeColor(ORANGE)
+            canvas_obj.setLineWidth(3)
+            canvas_obj.line(0, PAGE_H - 4, PAGE_W, PAGE_H - 4)
+            if logo_path and os.path.exists(logo_path):
+                from PIL import Image as PILImage
+                img = PILImage.open(logo_path)
+                img_w, img_h = img.size
+                aspect = img_h / img_w
+                footer_logo_w = 0.7 * inch
+                footer_logo_h = footer_logo_w * aspect
+                canvas_obj.drawImage(logo_path, MARGIN_L, 0.28 * inch, width=footer_logo_w, height=footer_logo_h, mask='auto', preserveAspectRatio=True)
+            canvas_obj.setFont("Helvetica", 7.5)
+            canvas_obj.setFillColor(MED_GRAY)
+            canvas_obj.drawCentredString(PAGE_W / 2, 0.4 * inch, "ReDry, LLC  |  re-dry.com  |  info@re-dry.com  |  Confidential and Proprietary")
+            canvas_obj.drawRightString(PAGE_W - MARGIN_R, 0.4 * inch, f"Page {doc.page}")
+            canvas_obj.restoreState()
+
+    doc = FixedClientDocTemplate(buf, pagesize=letter, leftMargin=MARGIN_L, rightMargin=MARGIN_R, topMargin=MARGIN_T, bottomMargin=MARGIN_B, title=f"ReDry Fixed Lease - {project_name}", author="ReDry, LLC")
+    story = []
+    usable_width = PAGE_W - MARGIN_L - MARGIN_R
+
+    # Header
+    if logo_path and os.path.exists(logo_path):
+        from PIL import Image as PILImage
+        img = PILImage.open(logo_path)
+        img_w, img_h = img.size
+        aspect = img_h / img_w
+        logo_img = Image(logo_path, width=2.4 * inch, height=2.4 * inch * aspect)
+        header_data = [[logo_img, Paragraph(f"Proposal No: {proposal_num}<br/>Date: {proposal_date_display}<br/>Valid Through: {valid_through}", ParagraphStyle('HeaderRight', parent=style_small, alignment=TA_RIGHT, fontSize=9, leading=13, textColor=MED_GRAY))]]
+        header_table = Table(header_data, colWidths=[usable_width * 0.6, usable_width * 0.4])
+        header_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0)]))
+        story.append(header_table)
+        story.append(Spacer(1, 6))
+
+    story.append(Paragraph("FIXED LEASE OVERVIEW", style_title))
+    story.append(orange_rule())
+    story.append(Spacer(1, 4))
+
+    # FROM / TO
+    from_to_data = [
+        [Paragraph("FROM", style_label), Paragraph("TO", style_label), Paragraph("PROJECT", style_label)],
+        [Paragraph("ReDry, LLC<br/>Adam Capps, Founder<br/>865.771.3848<br/>adam@re-dry.com<br/>re-dry.com", ParagraphStyle('FromVal', parent=style_body, fontSize=9.5, leading=13, spaceAfter=0)),
+         Paragraph(to_text, ParagraphStyle('ToVal', parent=style_body, fontSize=9.5, leading=13, spaceAfter=0)),
+         Paragraph(f"<b>{project_name}</b><br/>{full_address}<br/>{project_section}<br/>Fixed Vent Lease", ParagraphStyle('ProjVal', parent=style_body, fontSize=9.5, leading=13, spaceAfter=0))]
+    ]
+    from_to_table = Table(from_to_data, colWidths=[usable_width * 0.33, usable_width * 0.33, usable_width * 0.34])
+    from_to_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0), ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 4)]))
+    story.append(from_to_table)
+    story.append(Spacer(1, 16))
+
+    # 1. The ReDry Solution
+    story.append(Paragraph("1. The ReDry Solution", style_section_head))
+    story.append(orange_rule())
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("The ReDry 2-Way Vent System is a proprietary solar-powered drying system that removes trapped moisture from commercial roof insulation — without membrane removal or tear-off. The system delivers proven results while extending the life of your existing roof.", style_body))
+    story.append(Spacer(1, 12))
+
+    # 2. Why ReDry
+    story.append(Paragraph("2. Why ReDry", style_section_head))
+    story.append(orange_rule())
+    story.append(Spacer(1, 6))
+    benefits = [
+        "No tear-off required — keeps your existing roof membrane intact",
+        "Solar-powered — no external power source needed",
+        "Proven technology — documented moisture reduction on hundreds of roofs",
+        "Non-invasive installation — minimal disruption to building operations",
+        "Equipment remains ReDry property — no asset to maintain or dispose of",
+        "Custom-engineered placement — vent positions optimized for each project",
+    ]
+    for b in benefits:
+        story.append(Paragraph(f"<font color='#E8943A'>&#10003;</font>&nbsp;&nbsp;{b}", style_body))
+        story.append(Spacer(1, 3))
+    story.append(Spacer(1, 12))
+
+    # 3. Project Scope
+    story.append(Paragraph("3. Project Scope Summary", style_section_head))
+    story.append(orange_rule())
+    story.append(Spacer(1, 6))
+    scope_data = [["Detail", "Value"]]
+    scope_data.append(["Project", project_name])
+    scope_data.append(["Location", full_address])
+    if project_section:
+        scope_data.append(["Section", project_section])
+    scope_data.append(["Vents", str(num_vents)])
+    scope_data.append(["Lease Term", f"{lease_term} months"])
+
+    scope_table = Table(scope_data, colWidths=[usable_width * 0.4, usable_width * 0.6])
+    scope_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), NAVY),
+        ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('LEADING', (0, 0), (-1, -1), 14),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 0.5, BORDER_GRAY),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [WHITE, LIGHT_GRAY]),
+    ]))
+    story.append(scope_table)
+    story.append(Spacer(1, 12))
+
+    # 4. Next Steps
+    story.append(Paragraph("4. Next Steps", style_section_head))
+    story.append(orange_rule())
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("To review the full proposal with pricing details and accept online:", style_body))
+    story.append(Spacer(1, 8))
+    if proposal_id:
+        story.append(Paragraph(f'<a href="https://proposals.re-dry.com/proposal/{proposal_id}" color="#E8943A"><b>View Full Proposal &amp; Accept Online</b></a>', style_body))
+    story.append(Spacer(1, 12))
+
+    # Vent map
+    if vent_map_path and os.path.exists(vent_map_path):
+        story.append(PageBreak())
+        story.append(Paragraph("Exhibit A: Vent Placement Map", style_section_head))
+        story.append(orange_rule())
+        story.append(Spacer(1, 8))
+        try:
+            from PIL import Image as PILImage
+            img = PILImage.open(vent_map_path)
+            img_w, img_h = img.size
+            aspect = img_h / img_w
+            max_w = usable_width
+            max_h = PAGE_H - MARGIN_T - MARGIN_B - 1.5 * inch
+            display_w = min(max_w, max_h / aspect) if aspect > 0 else max_w
+            display_h = display_w * aspect
+            map_img = Image(vent_map_path, width=display_w, height=display_h)
+            story.append(map_img)
+        except Exception:
+            story.append(Paragraph("[Vent placement map image]", style_body))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
+
 if __name__ == "__main__":
     # Test with sample data
     config = {

@@ -71,6 +71,42 @@ function LoginScreen({onLogin}) {
   </div>);
 }
 
+// ─── Lease Type Selector ───
+function LeaseTypeSelector({onSelect, onSearch, onDashboard}) {
+  const [hover, setHover] = useState(null);
+  const card = (type, hovered) => ({
+    flex:"1 1 300px", maxWidth:400, background:"#fff", borderRadius:12,
+    border:`2px solid ${hovered ? C.orange : C.border}`, padding:"36px 28px",
+    cursor:"pointer", transition:"all 0.2s", textAlign:"center",
+    boxShadow: hovered ? "0 4px 20px rgba(232,148,58,0.15)" : "0 1px 3px rgba(0,0,0,0.04)"
+  });
+  return (<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg}}>
+    <div style={{width:"100%",maxWidth:860,padding:"0 20px"}}>
+      <div style={{textAlign:"center",marginBottom:32}}>
+        <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>ReDry</div>
+        <h1 style={{fontSize:28,fontWeight:800,color:C.navy,margin:"0 0 8px",fontFamily:"'Playfair Display',serif"}}>Proposal Builder</h1>
+        <p style={{color:C.gray,fontSize:14}}>Select a lease type to get started.</p>
+      </div>
+      <div style={{display:"flex",gap:24,flexWrap:"wrap",justifyContent:"center"}}>
+        <div style={card("performance", hover==="performance")} onMouseEnter={()=>setHover("performance")} onMouseLeave={()=>setHover(null)} onClick={()=>onSelect("performance")}>
+          <div style={{fontSize:32,marginBottom:12}}>&#9879;</div>
+          <h2 style={{fontSize:18,fontWeight:800,color:C.navy,margin:"0 0 8px"}}>Performance Lease</h2>
+          <p style={{fontSize:13,color:C.gray,lineHeight:1.6,margin:0}}>Full system install priced per square foot. Includes moisture monitoring program. $10,000 minimum.</p>
+        </div>
+        <div style={card("fixed", hover==="fixed")} onMouseEnter={()=>setHover("fixed")} onMouseLeave={()=>setHover(null)} onClick={()=>onSelect("fixed")}>
+          <div style={{fontSize:32,marginBottom:12}}>&#9878;</div>
+          <h2 style={{fontSize:18,fontWeight:800,color:C.navy,margin:"0 0 8px"}}>Fixed Lease</h2>
+          <p style={{fontSize:13,color:C.gray,lineHeight:1.6,margin:0}}>Rent individual vents at a fixed rate. Adjustable pricing and lease term.</p>
+        </div>
+      </div>
+      <div style={{textAlign:"center",marginTop:24,display:"flex",gap:12,justifyContent:"center"}}>
+        <button onClick={onSearch} style={{background:"none",border:"none",color:C.gray,fontSize:13,cursor:"pointer",textDecoration:"underline"}}>Past Proposals</button>
+        <button onClick={onDashboard} style={{background:"none",border:"none",color:C.gray,fontSize:13,cursor:"pointer",textDecoration:"underline"}}>Dashboard</button>
+      </div>
+    </div>
+  </div>);
+}
+
 // ─── Google Places Autocomplete loader ───
 let _gmapsLoaded = false, _gmapsLoading = false, _gmapsCallbacks = [];
 function loadGoogleMaps(apiKey) {
@@ -204,6 +240,52 @@ function calcOptions(form, taxRate) {
   return opts;
 }
 
+// ─── Fixed Lease defaults & helpers ───
+const defaultFixedForm = {
+  leaseType:"fixed",
+  clientCompany:"", clientContact:"", clientTitle:"", clientPhone:"", clientEmail:"",
+  projectName:"", projectAddress:"", projectCity:"", projectState:"", projectZip:"",
+  projectSection:"", numVents:"", ventRate:"1000", leaseTerm:"12", installFee:"0",
+  proposalDate: new Date().toISOString().split("T")[0], validDays:"30",
+  taxRate:"", taxRateOverride:"",
+  showOption0: false, showOption1: true, showOption2: false,
+  showCustomOption: false, customOptionLabel:"", customOptionAdj:"0",
+  customOptionPayments: [{ pct:"100", label:"Full Payment", due:"Due upon contract execution" }]
+};
+const LS_FIXED_FORM = "redry_fixed_form";
+const LS_FIXED_PRESETS = "redry_fixed_presets";
+const loadFixedForm = () => { try { const s=localStorage.getItem(LS_FIXED_FORM); return s ? {...defaultFixedForm,...JSON.parse(s), proposalDate:new Date().toISOString().split("T")[0]} : defaultFixedForm; } catch(e){ return defaultFixedForm; }};
+const saveFixedForm = f => { try { localStorage.setItem(LS_FIXED_FORM, JSON.stringify(f)); } catch(e){} };
+const loadFixedPresets = () => { try { const s=localStorage.getItem(LS_FIXED_PRESETS); return s ? JSON.parse(s) : []; } catch(e){ return []; }};
+const saveFixedPresets = p => { try { localStorage.setItem(LS_FIXED_PRESETS, JSON.stringify(p)); } catch(e){} };
+
+function calcFixedOptions(form, taxRate) {
+  const numVents=parseInt(form.numVents)||0, ventRate=parseFloat(form.ventRate)||0;
+  const leaseTerm=parseInt(form.leaseTerm)||12;
+  const installFee=parseFloat(form.installFee)||0;
+  const ventBase = numVents * ventRate;
+  const tr = taxRate || 0;
+  const build = (label, adj, splits) => {
+    const adjusted = round2(ventBase * (1 + adj));
+    const tax = round2(adjusted * tr);
+    const subtotal = round2(adjusted + tax);
+    const total = round2(subtotal + installFee);
+    const achEligible = total >= 10000;
+    const achTotal = achEligible ? round2(total - 100) : total;
+    const payments = splits.map(s => ({...s, amount: round2(total * s.pct), achAmount: round2(achTotal * s.pct)}));
+    return { label, adj, adjusted, tax, achEligible, total, achTotal, payments, ventBase, installFee, leaseTerm, numVents };
+  };
+  const opts = [
+    build("Pay in Full", -0.03, [{ pct:1.0, label:"Full Payment", due:"Due upon contract execution" }]),
+    build("50% Now. 50% at Install.", 0, [{ pct:0.50, label:"Deposit (50%)", due:"Due upon contract execution" },{ pct:0.50, label:"Balance (50%)", due:"Due upon ReDry vent installation" }]),
+    build("Let’s Get Going!", 0.03, [{ pct:0.10, label:"Deposit (10%)", due:"Due upon contract execution" },{ pct:0.40, label:"Install Payment (40%)", due:"Due when ready for install" },{ pct:0.50, label:"Final Payment (50%)", due:"Due upon ReDry vent installation" }]),
+  ];
+  const customPmts = (form.customOptionPayments || []).map(p => ({ pct: (parseFloat(p.pct)||0)/100, label: p.label||"Payment", due: p.due||"" }));
+  const customAdj = (parseFloat(form.customOptionAdj)||0)/100;
+  opts.push(build(form.customOptionLabel || "Custom", customAdj, customPmts.length > 0 ? customPmts : [{ pct:1.0, label:"Full Payment", due:"" }]));
+  return opts;
+}
+
 function Inp({label,value,onChange,type="text",placeholder,prefix,suffix,half,third,required,disabled,autoComplete}) {
   const st = {flex: half?"0 0 48%":third?"0 0 31%":"1 1 100%", minWidth: third?140:half?200:0};
   return (
@@ -246,7 +328,7 @@ function PHDTable({compact}) {
 }
 
 // ─── BUILDER FORM ───
-function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,taxRate,setTaxRate,onSearch,onDashboard}) {
+function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,taxRate,setTaxRate,onSearch,onDashboard,onBack}) {
   const fileRef = useRef();
   const resultRef = useRef();
   useEffect(()=>{ if(result && resultRef.current) resultRef.current.scrollIntoView({behavior:"smooth",block:"nearest"}); },[result]);
@@ -296,6 +378,10 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
       <h1 style={{fontSize:28,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>Create New Proposal</h1>
       <p style={{color:C.gray,fontSize:14,marginTop:6}}>Fill in the project details to generate a branded PDF and shareable client link.</p>
       <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:10}}>
+        {onBack && <button onClick={onBack} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,transition:"all 0.15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor=C.orange;e.currentTarget.style.color=C.orange}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.navy}}>
+          &larr; Lease Type
+        </button>}
         {onSearch && <button onClick={onSearch} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,transition:"all 0.15s"}}
           onMouseEnter={e=>{e.currentTarget.style.borderColor=C.orange;e.currentTarget.style.color=C.orange}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.navy}}>
           &#128269; Past Proposals
@@ -571,6 +657,320 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
               }catch(e){alert("Error: "+e.message); onSetResult(r=>({...r,sendingApproval:false}));}
             }} disabled={result.sendingApproval}
               style={{width:"100%",padding:"10px 20px",border:"2px solid #1B2A4A",borderRadius:6,background:result.sendingApproval?"#cbd5e1":"#fff",color:"#1B2A4A",fontSize:13,fontWeight:700,cursor:result.sendingApproval?"wait":"pointer"}}>
+              {result.sendingApproval?"Sending...":"Send for Approval"}
+            </button>
+          ) : (
+            <div style={{fontSize:13,color:"#15803d",fontWeight:600}}>&#10003; Approval request sent to {result.approvalTo}</div>
+          )}
+        </div>
+      </div>}
+    </div>}
+  </div>);
+}
+
+// ─── FIXED LEASE BUILDER ───
+function FixedLeaseBuilder({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,taxRate,setTaxRate,onSearch,onDashboard,onBack}) {
+  const fileRef = useRef();
+  const resultRef = useRef();
+  useEffect(()=>{ if(result && resultRef.current) resultRef.current.scrollIntoView({behavior:"smooth",block:"nearest"}); },[result]);
+  const [presets,setPresetsState] = useState(loadFixedPresets());
+  const [presetName,setPresetName] = useState("");
+  const [showSavePreset,setShowSavePreset] = useState(false);
+  const s = k => v => setForm(f=>({...f,[k]:v}));
+  const numVents=parseInt(form.numVents)||0, ventRate=parseFloat(form.ventRate)||0;
+  const leaseTerm=parseInt(form.leaseTerm)||12;
+  const installFee=parseFloat(form.installFee)||0;
+  const leaseTotal=numVents*ventRate;
+  const ok = form.clientCompany && form.projectName && form.projectAddress && numVents>0;
+
+  useEffect(()=>{ saveFixedForm(form); },[form]);
+
+  useEffect(()=>{
+    const st = form.projectState?.toUpperCase().trim();
+    if(st && st.length===2){
+      authFetch(`${API}/api/tax-rate?state=${st}`).then(r=>r.json()).then(d=>{
+        if(d.rate !== undefined && !form.taxRateOverride) setTaxRate(d.rate);
+      }).catch(()=>{});
+    }
+  },[form.projectState]);
+
+  const options = calcFixedOptions(form, taxRate);
+
+  const doSavePreset = () => {
+    if(!presetName.trim()) return;
+    const p = [...presets, { name: presetName.trim(), data: {...form} }];
+    setPresetsState(p); saveFixedPresets(p); setPresetName(""); setShowSavePreset(false);
+  };
+  const doLoadPreset = (preset) => {
+    setForm(f=>({...f, ...preset.data, proposalDate: new Date().toISOString().split("T")[0], projectName:"", projectAddress:"", projectCity:"", projectState:"", projectZip:"", projectSection:"", numVents:"", taxRateOverride:"" }));
+  };
+  const doDeletePreset = (idx) => {
+    const p = presets.filter((_,i)=>i!==idx);
+    setPresetsState(p); saveFixedPresets(p);
+  };
+  const doClear = () => {
+    setForm({...defaultFixedForm, proposalDate: new Date().toISOString().split("T")[0]});
+  };
+
+  return (<div style={{maxWidth:820,margin:"0 auto"}}>
+    <div style={{textAlign:"center",marginBottom:32}}>
+      <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>ReDry Proposal Builder</div>
+      <h1 style={{fontSize:28,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>Fixed Lease Proposal</h1>
+      <p style={{color:C.gray,fontSize:14,marginTop:6}}>Rent individual vents at a fixed rate per vent.</p>
+      <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:10}}>
+        {onBack && <button onClick={onBack} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,transition:"all 0.15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor=C.orange;e.currentTarget.style.color=C.orange}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.navy}}>
+          &larr; Lease Type
+        </button>}
+        {onSearch && <button onClick={onSearch} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,transition:"all 0.15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor=C.orange;e.currentTarget.style.color=C.orange}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.navy}}>
+          &#128269; Past Proposals
+        </button>}
+        {onDashboard && <button onClick={onDashboard} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,transition:"all 0.15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor=C.orange;e.currentTarget.style.color=C.orange}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.navy}}>
+          &#128202; Dashboard
+        </button>}
+      </div>
+    </div>
+
+    {/* Presets Bar */}
+    <div style={{marginBottom:16,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+      <span style={{fontSize:12,fontWeight:700,color:C.navy,letterSpacing:0.5}}>QUICK LOAD:</span>
+      {presets.map((p,i)=>(
+        <div key={i} style={{display:"flex",alignItems:"center",gap:0}}>
+          <button className="preset-btn" onClick={()=>doLoadPreset(p)}>{p.name}</button>
+          <button onClick={()=>doDeletePreset(i)} style={{background:"none",border:"none",color:C.gray,cursor:"pointer",fontSize:14,padding:"0 4px",lineHeight:1}} title="Remove">&times;</button>
+        </div>
+      ))}
+      {!showSavePreset
+        ? <button className="preset-btn" onClick={()=>setShowSavePreset(true)} style={{borderStyle:"dashed",color:C.orange}}>+ Save Current</button>
+        : <div style={{display:"flex",gap:4,alignItems:"center"}}>
+            <input value={presetName} onChange={e=>setPresetName(e.target.value)} placeholder="Preset name" onKeyDown={e=>e.key==="Enter"&&doSavePreset()}
+              style={{padding:"5px 10px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:12,width:180,outline:"none"}}/>
+            <button className="preset-btn" onClick={doSavePreset} style={{background:C.orange,color:"#fff",borderColor:C.orange}}>Save</button>
+            <button className="preset-btn" onClick={()=>setShowSavePreset(false)}>Cancel</button>
+          </div>}
+      <button className="preset-btn" onClick={doClear} style={{marginLeft:"auto",color:C.red,borderColor:"#fecaca"}}>Clear Form</button>
+    </div>
+
+    <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:28,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+      <SecLabel>Client Information</SecLabel>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}><Inp label="Company Name" value={form.clientCompany} onChange={s("clientCompany")} placeholder="L.D. Tebben Company" required autoComplete="organization"/></div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+        <Inp label="Contact Name" value={form.clientContact} onChange={s("clientContact")} placeholder="Justin Boren" half autoComplete="name"/>
+        <Inp label="Title" value={form.clientTitle} onChange={s("clientTitle")} placeholder="Senior Technical Estimator" half autoComplete="organization-title"/>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
+        <Inp label="Phone" value={form.clientPhone} onChange={s("clientPhone")} placeholder="(512) 663-9226" half autoComplete="tel"/>
+        <Inp label="Email" value={form.clientEmail} onChange={s("clientEmail")} placeholder="jboren@ldtebben.com" half autoComplete="email"/>
+      </div>
+
+      <SecLabel>Project Details</SecLabel>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}><Inp label="Project Name" value={form.projectName} onChange={s("projectName")} placeholder="Crockett High School" required/></div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+        <AddressAutocomplete value={form.projectAddress} onChange={s("projectAddress")} placeholder="5601 Menchaca Rd" required
+          onPlaceSelect={({address,city,state,zip})=>{
+            setForm(f=>({...f, projectAddress:address, projectCity:city, projectState:state, projectZip:zip}));
+          }}/>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+        <Inp label="City" value={form.projectCity} onChange={s("projectCity")} placeholder="Austin" third autoComplete="address-level2"/>
+        <Inp label="State" value={form.projectState} onChange={s("projectState")} placeholder="TX" third autoComplete="address-level1"/>
+        <Inp label="ZIP" value={form.projectZip} onChange={s("projectZip")} placeholder="78745" third autoComplete="postal-code"/>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
+        <Inp label="Section / Area" value={form.projectSection} onChange={s("projectSection")} placeholder="North Section" half/>
+      </div>
+
+      <SecLabel>Pricing</SecLabel>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+        <Inp label="Number of Vents" value={form.numVents} onChange={s("numVents")} placeholder="5" type="number" required third/>
+        <Inp label="Rate per Vent" value={form.ventRate} onChange={s("ventRate")} prefix="$" suffix="/ vent" type="number" third/>
+        <Inp label="Lease Term" value={form.leaseTerm} onChange={s("leaseTerm")} suffix="months" type="number" third/>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+        <Inp label="Install / Setup Fee" value={form.installFee} onChange={s("installFee")} prefix="$" type="number" third/>
+        <Inp label="Proposal Date" value={form.proposalDate} onChange={s("proposalDate")} type="date" third/>
+        <Inp label="Valid Days" value={form.validDays} onChange={s("validDays")} suffix="days" type="number" third/>
+      </div>
+
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-end",marginBottom:4}}>
+        <div style={{flex:"0 0 31%",minWidth:140}}>
+          <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>
+            Rental Tax Rate {form.projectState && <span style={{fontWeight:400,color:C.gray}}>({form.projectState.toUpperCase()} base: {fmtPct(taxRate)})</span>}
+          </label>
+          <div style={{display:"flex",alignItems:"center",background:"#fff",border:`1px solid ${C.border}`,borderRadius:6,overflow:"hidden"}}>
+            <input type="number" step="0.01" value={form.taxRateOverride || (taxRate*100).toFixed(2)}
+              onChange={e=>{const v=parseFloat(e.target.value); setForm(f=>({...f,taxRateOverride:e.target.value})); if(!isNaN(v)) setTaxRate(v/100);}}
+              style={{flex:1,padding:"8px 12px",border:"none",outline:"none",fontSize:14,fontFamily:"'DM Sans',sans-serif",color:C.dark,background:"transparent",width:"100%"}}/>
+            <span style={{padding:"8px 12px 8px 0",color:C.gray,fontSize:13}}>%</span>
+          </div>
+        </div>
+      </div>
+
+      {numVents>0 && <div style={{marginTop:20}}>
+        <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Payment Options</div>
+
+        <div style={{display:"flex",gap:16,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+          {["Pay in Full","50% Now. 50% at Install.","Let’s Get Going!"].map((name,i)=>(
+            <label key={i} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:600,color:!!form[`showOption${i}`]?C.navy:C.gray}}>
+              <input type="checkbox" checked={!!form[`showOption${i}`]} onChange={e=>setForm(f=>({...f,[`showOption${i}`]:e.target.checked}))}
+                style={{width:16,height:16,accentColor:C.orange,cursor:"pointer"}}/>
+              {name}
+            </label>
+          ))}
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:600,color:form.showCustomOption?C.orange:C.gray}}>
+            <input type="checkbox" checked={!!form.showCustomOption} onChange={e=>setForm(f=>({...f,showCustomOption:e.target.checked}))}
+              style={{width:16,height:16,accentColor:C.orange,cursor:"pointer"}}/>
+            Custom
+          </label>
+        </div>
+
+        {form.showCustomOption && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:14}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.orange,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Custom Payment Option</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:12}}>
+            <Inp label="Option Label" value={form.customOptionLabel} onChange={v=>setForm(f=>({...f,customOptionLabel:v}))} placeholder="e.g. Net 30" half/>
+            <Inp label="Price Adjustment" value={form.customOptionAdj} onChange={v=>setForm(f=>({...f,customOptionAdj:v}))} suffix="%" type="number" half placeholder="0 = standard, -3 = discount, 3 = fee"/>
+          </div>
+          <div style={{fontSize:12,fontWeight:600,color:C.navy,marginBottom:8}}>Payment Schedule</div>
+          {(form.customOptionPayments||[]).map((pmt,pi)=>(
+            <div key={pi} style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-end"}}>
+              <div style={{flex:"0 0 70px"}}>
+                <label style={{display:"block",fontSize:11,fontWeight:600,color:C.navy,marginBottom:2}}>Split %</label>
+                <input type="number" value={pmt.pct} onChange={e=>{const ps=[...(form.customOptionPayments||[])];ps[pi]={...ps[pi],pct:e.target.value};setForm(f=>({...f,customOptionPayments:ps}));}}
+                  style={{width:"100%",padding:"6px 8px",border:`1px solid ${C.border}`,borderRadius:4,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+              </div>
+              <div style={{flex:1}}>
+                <label style={{display:"block",fontSize:11,fontWeight:600,color:C.navy,marginBottom:2}}>Label</label>
+                <input value={pmt.label} onChange={e=>{const ps=[...(form.customOptionPayments||[])];ps[pi]={...ps[pi],label:e.target.value};setForm(f=>({...f,customOptionPayments:ps}));}}
+                  placeholder="e.g. Deposit (50%)" style={{width:"100%",padding:"6px 8px",border:`1px solid ${C.border}`,borderRadius:4,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+              </div>
+              <div style={{flex:1}}>
+                <label style={{display:"block",fontSize:11,fontWeight:600,color:C.navy,marginBottom:2}}>Due</label>
+                <input value={pmt.due} onChange={e=>{const ps=[...(form.customOptionPayments||[])];ps[pi]={...ps[pi],due:e.target.value};setForm(f=>({...f,customOptionPayments:ps}));}}
+                  placeholder="e.g. Due upon execution" style={{width:"100%",padding:"6px 8px",border:`1px solid ${C.border}`,borderRadius:4,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+              </div>
+              {(form.customOptionPayments||[]).length>1 && <button onClick={()=>{const ps=[...(form.customOptionPayments||[])];ps.splice(pi,1);setForm(f=>({...f,customOptionPayments:ps}));}}
+                style={{padding:"6px 10px",border:`1px solid ${C.red}`,borderRadius:4,background:"#fff",color:C.red,fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0,height:32}}>&#10005;</button>}
+            </div>
+          ))}
+          <div style={{display:"flex",gap:8,alignItems:"center",marginTop:4}}>
+            <button onClick={()=>setForm(f=>({...f,customOptionPayments:[...(f.customOptionPayments||[]),{pct:"",label:"",due:""}]}))}
+              style={{padding:"6px 14px",border:`1px solid ${C.orange}`,borderRadius:4,background:"#fff",color:C.orange,fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Add Payment</button>
+            <span style={{fontSize:11,color:C.gray}}>Total: {(form.customOptionPayments||[]).reduce((s,p)=>s+(parseFloat(p.pct)||0),0)}% (should equal 100%)</span>
+          </div>
+        </div>}
+
+        {/* Pricing summary */}
+        <div style={{background:"#f8fafc",borderRadius:8,padding:"12px 16px",marginBottom:12,fontSize:13,color:C.gray,lineHeight:1.7}}>
+          <span style={{fontWeight:600,color:C.navy}}>Lease:</span> {numVents} vent{numVents!==1?"s":""} &times; {fmtC(ventRate)}/vent = {fmtC(leaseTotal)}
+          {leaseTerm !== 12 && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.navy}}>Term:</span> {leaseTerm} months</span>}
+          {installFee>0 && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.navy}}>Install:</span> {fmtC(installFee)}</span>}
+          {taxRate>0 && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.navy}}>Tax:</span> {fmtPct(taxRate)}</span>}
+          {options[0].achEligible && <span> &nbsp;|&nbsp; <span style={{fontWeight:600,color:C.green}}>$100 ACH discount</span> available</span>}
+        </div>
+
+        {/* Option cards */}
+        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+          {options.map((opt,oi)=>{
+            if(oi<3 && !form[`showOption${oi}`]) return null;
+            if(oi===3 && !form.showCustomOption) return null;
+            const isCustom = oi===3;
+            return (
+            <div key={oi} style={{flex:"1 1 220px",background:isCustom?"#fef7ed":oi===1?"#fef7ed":"#f8fafc",border:`1px solid ${isCustom||oi===1?C.orange:C.border}`,borderRadius:8,padding:14,position:"relative"}}>
+              {oi===1 && <div style={{position:"absolute",top:-8,right:12,background:C.orange,color:"#fff",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4}}>DEFAULT</div>}
+              {isCustom && <div style={{position:"absolute",top:-8,right:12,background:C.orange,color:"#fff",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4}}>CUSTOM</div>}
+              <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:6}}>{opt.label}</div>
+              {opt.adj!==0 && <div style={{fontSize:11,color:opt.adj<0?C.green:C.orange,marginBottom:6}}>{opt.adj<0?`${Math.abs(opt.adj*100)}% discount applied`:`${Math.abs(opt.adj*100)}% convenience fee`}</div>}
+              <div style={{fontSize:11,marginBottom:4}}>
+                <div style={{display:"flex",justifyContent:"space-between",color:C.gray}}><span>Vent Rental</span><span>{fmtC(opt.adjusted)}</span></div>
+                {opt.tax>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.gray}}><span>Tax ({fmtPct(taxRate)})</span><span>{fmtC(opt.tax)}</span></div>}
+                {installFee>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.gray}}><span>Install Fee</span><span>{fmtC(installFee)}</span></div>}
+              </div>
+              <div style={{fontSize:20,fontWeight:800,color:C.navy,marginBottom:8,borderTop:`1px solid ${C.border}`,paddingTop:4}}>{fmtC(opt.total)}</div>
+              {opt.payments.map((p,pi)=>(
+                <div key={pi} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderTop:pi===0?`1px solid ${C.border}`:"none",marginTop:pi===0?4:0}}>
+                  <span style={{color:C.gray}}>{p.label}</span>
+                  <span style={{fontWeight:700,color:C.navy}}>{fmtC(p.amount)}</span>
+                </div>
+              ))}
+            </div>
+          );})}
+        </div>
+      </div>}
+
+      <SecLabel>Vent Placement Map</SecLabel>
+      <div onClick={()=>fileRef.current?.click()}
+        onDragOver={e=>{e.preventDefault();e.stopPropagation()}}
+        onDrop={e=>{e.preventDefault();e.stopPropagation();const f=e.dataTransfer.files[0];if(f&&f.type.startsWith("image/"))setVentMapFile(f)}}
+        style={{border:`2px dashed ${ventMapFile?C.orange:C.border}`,borderRadius:8,padding:24,textAlign:"center",cursor:"pointer",background:ventMapFile?"#fef7ed":"#fff"}}>
+        <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&setVentMapFile(e.target.files[0])}/>
+        {ventMapFile
+          ? <div><div style={{fontSize:13,fontWeight:600,color:C.orange}}>&#10003; {ventMapFile.name}</div><div style={{fontSize:12,color:C.gray,marginTop:4}}>Click or drop to replace</div></div>
+          : <div><div style={{fontSize:28,marginBottom:4}}>&#128206;</div><div style={{fontSize:13,fontWeight:600,color:C.navy}}>Drop vent placement map here</div><div style={{fontSize:12,color:C.gray,marginTop:4}}>or click to browse (PNG, JPG)</div></div>}
+      </div>
+    </div>
+
+    <div style={{display:"flex",gap:12,marginTop:20}}>
+      <button onClick={onPDF} disabled={!ok||loading} style={{flex:1,padding:"14px 0",border:"none",borderRadius:8,background:ok&&!loading?C.navy:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:ok&&!loading?"pointer":"not-allowed",letterSpacing:0.5}}>
+        {loading==="pdf"?"Generating...":"Download PDF"}
+      </button>
+      <button onClick={onLink} disabled={!ok||loading} style={{flex:1,padding:"14px 0",border:"none",borderRadius:8,background:ok&&!loading?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:ok&&!loading?"pointer":"not-allowed",letterSpacing:0.5}}>
+        {loading==="link"?"Creating...":"Create Client Link"}
+      </button>
+    </div>
+
+    {result && <div ref={resultRef} style={{marginTop:16,padding:16,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8}}>
+      {result.type==="pdf" && <div style={{fontSize:14,color:"#15803d",fontWeight:600}}>&#10003; PDF downloaded successfully!</div>}
+      {result.type==="link" && <div>
+        <div style={{fontSize:14,color:"#15803d",fontWeight:600,marginBottom:8}}>&#10003; Client proposal link created!</div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <input readOnly value={`${window.location.origin}${result.clientUrl}`}
+            style={{flex:1,padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,fontFamily:"monospace",color:C.dark,background:"#fff"}}
+            onClick={e=>e.target.select()}/>
+          <button onClick={()=>navigator.clipboard.writeText(`${window.location.origin}${result.clientUrl}`)}
+            style={{padding:"8px 16px",border:`1px solid ${C.border}`,borderRadius:6,background:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",color:C.navy,whiteSpace:"nowrap"}}>Copy</button>
+        </div>
+        <div style={{fontSize:12,color:C.gray,marginTop:6}}>Share this link with your client.
+          <a href={result.clientUrl} target="_blank" rel="noopener" style={{color:C.orange,marginLeft:6,fontWeight:600}}>Preview &#8594;</a>
+        </div>
+
+        <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
+          {!result.emailSent ? (<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <input value={result.sendEmail||form.clientEmail||""} onChange={e=>onSetResult(r=>({...r,sendEmail:e.target.value}))}
+              placeholder="client@company.com" type="email"
+              style={{flex:"1 1 200px",padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,color:C.dark,background:"#fff",outline:"none"}}/>
+            <button onClick={async()=>{
+              const email = result.sendEmail||form.clientEmail;
+              if(!email){alert("Enter an email address"); return;}
+              onSetResult(r=>({...r,sending:true}));
+              try{
+                const r=await authFetch(`${API}/api/proposal/${result.proposalId}/send`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+                const d=await r.json();
+                if(d.sent) onSetResult(r=>({...r,emailSent:true,sentTo:email,sending:false}));
+                else { alert(d.error||"Failed to send"); onSetResult(r=>({...r,sending:false})); }
+              }catch(e){ alert("Failed to send email"); onSetResult(r=>({...r,sending:false})); }
+            }} disabled={result.sending}
+              style={{padding:"8px 16px",border:"none",borderRadius:6,background:C.orange,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",opacity:result.sending?0.6:1}}>
+              {result.sending?"Sending...":"Send to Client"}
+            </button>
+          </div>) : (
+            <div style={{fontSize:13,color:"#15803d",fontWeight:600}}>&#10003; Sent to {result.sentTo}</div>
+          )}
+        </div>
+
+        <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
+          {!result.approvalSent ? (
+            <button onClick={async()=>{
+              onSetResult(r=>({...r,sendingApproval:true}));
+              try{
+                const r=await authFetch(`${API}/api/proposal/${result.proposalId}/send-for-approval`,{method:"POST"});
+                const d=await r.json();
+                if(d.sent) onSetResult(r=>({...r,approvalSent:true,approvalTo:d.to,sendingApproval:false}));
+                else { alert(d.error||"Failed"); onSetResult(r=>({...r,sendingApproval:false})); }
+              }catch(e){ alert("Failed"); onSetResult(r=>({...r,sendingApproval:false})); }
+            }} disabled={result.sendingApproval}
+              style={{padding:"8px 16px",border:`1px solid ${C.navy}`,borderRadius:6,background:"#fff",color:C.navy,fontSize:13,fontWeight:700,cursor:"pointer",opacity:result.sendingApproval?0.6:1}}>
               {result.sendingApproval?"Sending...":"Send for Approval"}
             </button>
           ) : (
@@ -883,6 +1283,280 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   </div>);
 }
 
+// ─── FIXED LEASE CLIENT VIEW ───
+function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
+  const [sigName,setSigName]=useState(""), [sigDate,setSigDate]=useState("");
+  const [accepted,setAccepted]=useState(false), [submitting,setSubmitting]=useState(false);
+  const [selectedOption,setSelectedOption]=useState(null);
+  const [payingWith,setPayingWith]=useState("card");
+  const [checkoutLoading,setCheckoutLoading]=useState(false);
+  const savedTaxRate = (() => {
+    const ov = parseFloat(form.taxRateOverride);
+    if(!isNaN(ov) && ov > 0) return ov / 100;
+    const saved = parseFloat(form.taxRate);
+    if(!isNaN(saved) && saved > 0) return saved;
+    return 0;
+  })();
+  const [taxRate,setTaxRate]=useState(savedTaxRate);
+  const [paymentSuccess,setPaymentSuccess]=useState(false);
+
+  const numVents=parseInt(form.numVents)||0, ventRate=parseFloat(form.ventRate)||0;
+  const leaseTerm=parseInt(form.leaseTerm)||12;
+  const installFee=parseFloat(form.installFee)||0;
+  const leaseTotal=numVents*ventRate;
+  const pn=propNum(form.proposalDate), vt=addDays(form.proposalDate,parseInt(form.validDays)||30);
+  const addr=[form.projectAddress,[form.projectCity,form.projectState].filter(Boolean).join(", "),form.projectZip].filter(Boolean).join(", ");
+
+  useEffect(()=>{
+    const params = new URLSearchParams(window.location.search);
+    if(params.get("payment")==="success") {
+      setPaymentSuccess(true);
+      const opt = parseInt(params.get("option"))||1;
+      const pmt = parseInt(params.get("pmt"))||1;
+      const amt = parseInt(params.get("amt"))||0;
+      const method = params.get("method")||"card";
+      if(proposalId) {
+        fetch(`${API}/api/proposal/${proposalId}/payment-confirm`, {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({option:opt, paymentNumber:pmt, amount:amt, method:method})
+        }).catch(()=>{});
+      }
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  },[]);
+
+  useEffect(()=>{
+    if(savedTaxRate > 0) { setTaxRate(savedTaxRate); return; }
+    const st = form.projectState?.toUpperCase().trim();
+    if(st && st.length===2){
+      fetch(`${API}/api/tax-rate?state=${st}`).then(r=>{if(!r.ok)throw new Error();return r.json();}).then(d=>{
+        if(d.rate !== undefined) { const ov=parseFloat(form.taxRateOverride); setTaxRate(!isNaN(ov)&&ov>0?ov/100:d.rate); }
+      }).catch(()=>{});
+    }
+  },[form.projectState]);
+
+  const options = calcFixedOptions(form, taxRate);
+  const visibleOptions = options.map((opt,oi)=>({opt,oi})).filter(({oi})=> {
+    if(oi===3) return !!form.showCustomOption;
+    return form[`showOption${oi}`] === undefined || form[`showOption${oi}`] === true;
+  });
+
+  const visibleCount = visibleOptions.length;
+  const singleOptionIndex = visibleCount === 1 ? visibleOptions[0].oi : null;
+  useEffect(()=>{
+    if(singleOptionIndex !== null && selectedOption === null) setSelectedOption(singleOptionIndex);
+  },[singleOptionIndex]);
+
+  const doCheckout = async(optIndex, pmtIndex) => {
+    const opt = options[optIndex]; const pmt = opt.payments[pmtIndex];
+    const useAch = payingWith === "ach";
+    const amount = useAch ? pmt.achAmount : pmt.amount;
+    setCheckoutLoading(true);
+    try {
+      const r = await fetch(`${API}/api/create-checkout`, {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({proposalId, option:optIndex+1, paymentNumber:pmtIndex+1, amountCents:Math.round(amount*100),
+          description:`ReDry Fixed Lease ${pmt.label} - ${form.projectName}`, paymentMethod:useAch?"ach":"card",
+          clientCompany:form.clientCompany, projectName:form.projectName})});
+      const d = await r.json();
+      if(d.url) window.location.href = d.url; else alert("Error: " + (d.error||"Unknown"));
+    } catch(e) { alert("Payment error. Please try again."); }
+    setCheckoutLoading(false);
+  };
+
+  const doAccept = async()=>{
+    if(!sigName||!sigDate||selectedOption===null)return;
+    setSubmitting(true);
+    try{
+      if(proposalId) await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption+1})});
+      setAccepted(true);
+    }catch(e){setAccepted(true);}
+    setSubmitting(false);
+  };
+
+  const SH=(n,t)=>(<div style={{marginTop:36,marginBottom:12}}><h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>{n}. {t}</h2><div style={{height:2,width:50,background:C.orange,marginTop:6}}/></div>);
+  const P=({children})=>(<p style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"8px 0",textAlign:"justify"}}>{children}</p>);
+  const B=({html})=>(<div style={{display:"flex",gap:10,marginBottom:6,fontSize:14,lineHeight:1.65,color:"#374151"}}><span style={{color:C.orange,fontWeight:700,flexShrink:0}}>&#8226;</span><span dangerouslySetInnerHTML={{__html:html}}/></div>);
+
+  if(accepted) return (
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{textAlign:"center",maxWidth:540,padding:40}}>
+        <div style={{width:72,height:72,borderRadius:"50%",background:"#dcfce7",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",fontSize:32}}>&#10003;</div>
+        <h1 style={{fontSize:26,fontWeight:800,color:C.navy,fontFamily:"'Playfair Display',serif",marginBottom:8}}>Proposal Accepted</h1>
+        <p style={{color:C.gray,fontSize:15,lineHeight:1.6}}>Thank you. Your signed acceptance has been recorded. The ReDry team will be in touch to coordinate next steps.</p>
+        <div style={{marginTop:24,padding:16,background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,color:C.gray}}>
+          <div>Signed by: <strong style={{color:C.dark}}>{sigName}</strong></div>
+          <div>Date: <strong style={{color:C.dark}}>{sigDate}</strong></div>
+          <div>Selected: <strong style={{color:C.dark}}>{options[selectedOption]?.label || `Option ${selectedOption+1}`}</strong></div>
+        </div>
+        {selectedOption!==null && <div style={{marginTop:20}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:12}}>Pay Your Deposit</div>
+          <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:12}}>
+            <button onClick={()=>setPayingWith("card")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
+            <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+              ACH / Bank Transfer {options[selectedOption].achEligible && "(Save $100)"}
+            </button>
+          </div>
+          <button onClick={()=>doCheckout(selectedOption, 0)} disabled={checkoutLoading}
+            style={{padding:"14px 32px",border:"none",borderRadius:8,background:C.orange,color:"#fff",fontSize:15,fontWeight:700,cursor:checkoutLoading?"wait":"pointer"}}>
+            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? options[selectedOption].payments[0].achAmount : options[selectedOption].payments[0].amount)} Deposit`}
+          </button>
+        </div>}
+      </div>
+    </div>
+  );
+
+  return (<div style={{minHeight:"100vh",background:C.bg}}>
+    <div style={{background:C.navy,padding:"10px 0"}}>
+      <div style={{maxWidth:820,margin:"0 auto",padding:"0 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{color:"#fff",fontSize:13,fontWeight:600,letterSpacing:1}}>RE<span style={{color:C.orange}}>DRY</span></span>
+        <div style={{display:"flex",gap:8}}>
+          {proposalId && <a href={`${API}/api/proposal/${proposalId}/pdf`} target="_blank" rel="noopener" style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",padding:"5px 14px",borderRadius:4,fontSize:12,textDecoration:"none"}}>PDF</a>}
+        </div>
+      </div>
+    </div>
+    {paymentSuccess && <div style={{background:"#f0fdf4",borderBottom:"1px solid #bbf7d0",padding:"12px 20px",textAlign:"center"}}>
+      <span style={{color:"#15803d",fontWeight:600,fontSize:14}}>&#10003; Payment received! Thank you.</span>
+    </div>}
+    <div style={{maxWidth:820,margin:"0 auto",padding:"32px 20px 60px"}}>
+      <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden",marginBottom:24}}>
+        <div style={{height:4,background:C.orange}}/>
+        <div style={{padding:"28px 32px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:16}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>Fixed Lease Proposal</div>
+              <h1 style={{fontSize:26,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>{form.projectName||"Project"}</h1>
+              <div style={{fontSize:14,color:C.gray,marginTop:4}}>{addr}</div>
+              {form.projectSection && <div style={{fontSize:14,color:C.gray}}>{form.projectSection}</div>}
+            </div>
+            <div style={{textAlign:"right",fontSize:13,color:C.gray,lineHeight:1.7}}><div>{pn}</div><div>{fmtDate(form.proposalDate)}</div><div>Valid through {vt}</div></div>
+          </div>
+          <div style={{display:"flex",gap:32,marginTop:24,paddingTop:20,borderTop:`1px solid ${C.border}`,flexWrap:"wrap"}}>
+            <div style={{flex:1,minWidth:200}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.orange,letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>From</div>
+              <div style={{fontSize:14,color:C.dark,lineHeight:1.7}}><strong>ReDry, LLC</strong><br/>Adam Capps, Founder<br/>865.771.3848<br/>adam@re-dry.com</div>
+            </div>
+            <div style={{flex:1,minWidth:200}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.orange,letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>To</div>
+              <div style={{fontSize:14,color:C.dark,lineHeight:1.7}}>
+                <strong>{form.clientCompany||"—"}</strong>
+                {form.clientContact && <><br/>{form.clientContact}</>}
+                {form.clientTitle && <><br/>{form.clientTitle}</>}
+                {form.clientPhone && <><br/>{form.clientPhone}</>}
+                {form.clientEmail && <><br/>{form.clientEmail}</>}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
+        {SH(1,"Project Overview")}
+        <P>ReDry, LLC is the manufacturer and lessor of the ReDry 2-Way Vent System, a proprietary solar-powered drying system designed to remove trapped moisture from commercial roof insulation without membrane removal or tear-off. This proposal covers the fixed-term rental of <strong>{numVents} ReDry 2-Way Vent{numVents!==1?"s":""}</strong> for the {form.projectSection||"designated area"} of {form.projectName}, located at {addr}.</P>
+        <P>The lease term is <strong>{leaseTerm} month{leaseTerm!==1?"s":""}</strong> at a rate of <strong>{fmtC(ventRate)} per vent</strong>. The roofing contractor is responsible for installing the 2-Way Vents per the ReDry Installation Specification. Following installation, ReDry will attach its proprietary ReDry Vent heads and confirm proper placement.</P>
+
+        {SH(2,"Scope of Work")}
+        <B html={`ReDry will furnish <strong>${numVents}</strong> ReDry 2-Way Vent${numVents!==1?"s":""} and ReDry Vent heads.`}/>
+        <B html="ReDry will provide the Installation Specification (SPEC-VENT-2026-01, Rev. A) and Placement Map to the roofing contractor."/>
+        <B html="The <strong>roofing contractor</strong> is solely responsible for installing and bonding the 2-Way Vents to the roof membrane per the Installation Specification."/>
+        <B html="Following installation, ReDry will attach the proprietary ReDry Vent heads and confirm proper positioning."/>
+        <B html="ReDry will complete photo documentation per specification requirements for warranty activation."/>
+        <B html={`Lease term: <strong>${leaseTerm} month${leaseTerm!==1?"s":""}</strong> from date of installation.`}/>
+        <B html="Vents remain the property of ReDry, LLC and will be retrieved at the conclusion of the lease term or once performance criteria are met."/>
+
+        {SH(3,"Pricing and Payment")}
+        <P>The vent rental is based on <strong>{numVents} vent{numVents!==1?"s":""}</strong> at <strong>{fmtC(ventRate)} per vent</strong> for a <strong>{leaseTerm}-month</strong> lease term.</P>
+
+        <div style={{background:"#f8fafc",borderRadius:8,padding:"14px 18px",margin:"12px 0 8px",fontSize:13,lineHeight:1.8,color:"#374151"}}>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Vent Rental:</span> {numVents} &times; {fmtC(ventRate)} = {fmtC(leaseTotal)}</div>
+          {taxRate>0 && <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Rental Tax:</span> {fmtPct(taxRate)} ({fmtC(round2(leaseTotal*taxRate))})</div>}
+          {installFee>0 && <div style={{display:"flex",flexWrap:"wrap",gap:4}}><span style={{fontWeight:700,color:C.navy,minWidth:100}}>Install Fee:</span> {fmtC(installFee)}</div>}
+          {visibleOptions.length>0 && visibleOptions[0].opt.achEligible && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>ACH Savings:</span> Save $100 when paying via bank transfer</div>}
+        </div>
+
+        {visibleOptions.length > 1 && <P>Select a payment option below:</P>}
+
+        <div style={{display:"flex",gap:16,marginTop:16,flexWrap:"wrap"}}>
+          {visibleOptions.map(({opt,oi})=>{
+            const sel = selectedOption===oi;
+            const tags = {0:{text:"BEST VALUE",bg:C.green}, 1:{text:"MOST POPULAR",bg:C.navy}, 2:{text:"EASY START",bg:C.orange}, 3:{text:"CUSTOM",bg:C.orange}};
+            const tag = tags[oi];
+            return (
+            <div key={oi} onClick={()=>setSelectedOption(oi)} style={{flex:"1 1 240px",background:sel?"#fef7ed":"#fff",border:`2px solid ${sel?C.orange:C.border}`,borderRadius:10,padding:"20px 18px",cursor:"pointer",position:"relative",transition:"all 0.2s"}}>
+              {tag && <div style={{position:"absolute",top:-10,right:12,background:tag.bg,color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:4}}>{tag.text}</div>}
+              <div style={{fontSize:16,fontWeight:700,color:C.navy,marginBottom:4}}>{opt.label}</div>
+              {opt.adj!==0 && <div style={{fontSize:12,color:opt.adj<0?C.green:C.orange,marginBottom:8}}>{opt.adj<0?`${Math.abs(opt.adj*100)}% discount for paying in full`:`${Math.abs(opt.adj*100)}% convenience fee applies`}</div>}
+              {opt.adj===0 && <div style={{fontSize:12,color:C.gray,marginBottom:8}}>Standard pricing</div>}
+              <div style={{fontSize:12,marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",color:C.gray,padding:"2px 0"}}><span>Vent Rental</span><span>{fmtC(opt.adjusted)}</span></div>
+                {opt.tax>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.gray,padding:"2px 0"}}><span>Rental Tax ({fmtPct(taxRate)})</span><span>{fmtC(opt.tax)}</span></div>}
+                {installFee>0 && <div style={{display:"flex",justifyContent:"space-between",color:C.gray,padding:"2px 0"}}><span>Install Fee</span><span>{fmtC(installFee)}</span></div>}
+              </div>
+              <div style={{fontSize:24,fontWeight:800,color:C.navy,marginBottom:12,borderTop:`1px solid ${C.border}`,paddingTop:8}}>{fmtC(opt.total)}</div>
+              <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10}}>
+                {opt.payments.map((p,pi)=>(
+                  <div key={pi} style={{marginBottom:pi<opt.payments.length-1?10:0}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:13,fontWeight:700,color:C.navy}}>{p.label}</span>
+                      <span style={{fontSize:15,fontWeight:800,color:C.navy}}>{fmtC(p.amount)}</span>
+                    </div>
+                    <div style={{fontSize:12,color:C.gray,marginTop:2}}>{p.due}</div>
+                  </div>
+                ))}
+              </div>
+              {sel && <div style={{marginTop:12,textAlign:"center"}}><span style={{display:"inline-block",background:C.orange,color:"#fff",padding:"5px 16px",borderRadius:4,fontSize:12,fontWeight:700}}>&#10003; SELECTED</span></div>}
+            </div>
+          );})}
+        </div>
+
+        {SH(4,"General Conditions")}
+        {[["4.1 Relationship of Parties","ReDry is the manufacturer and lessor of the ReDry Vent System and is not a roofing contractor or subcontractor."],
+          ["4.2 Roofing Contractor Responsibilities","The roofing contractor is solely responsible for installing and bonding the 2-Way Vents per the ReDry Installation Specification."],
+          ["4.3 Installation Specification","All work shall be performed per ReDry Vent System Installation Specification SPEC-VENT-2026-01 (Rev. A)."],
+          ["4.4 Equipment Ownership","All ReDry Vent heads remain the sole property of ReDry, LLC throughout the lease period."],
+          ["4.5 Lease Term",`The lease term is ${leaseTerm} months from the date of installation. Vents will be retrieved at the conclusion of the lease term or upon meeting performance criteria.`],
+          ["4.6 Access","The client shall provide safe, unobstructed access to the roof area during commissioning and scheduled inspections."],
+          ["4.7 Proposal Validity",`This proposal is valid for thirty (30) days from date of issue (${vt}).`],
+        ].map(([t,x])=><p key={t} style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"10px 0",textAlign:"justify"}}><strong style={{color:C.navy}}>{t}.</strong>&nbsp;&nbsp;{x}</p>)}
+      </div>
+      {ventMapUrl && <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
+        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Exhibit A: Vent Placement Map</h2>
+        <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
+        <img src={ventMapUrl} alt="Vent Placement Map" style={{width:"100%",borderRadius:8,border:`1px solid ${C.border}`}}/>
+      </div>}
+      <div style={{background:"#fff",borderRadius:12,border:`2px solid ${C.orange}`,padding:"28px 32px"}}>
+        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Acceptance and Payment</h2>
+        <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
+        {selectedOption===null && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:16}}>
+          <div style={{fontSize:14,fontWeight:600,color:C.orange}}>Please select a payment option above to continue.</div>
+        </div>}
+        {selectedOption!==null && <>
+          <P>By signing below, you accept this proposal under <strong>{options[selectedOption].label}</strong> and the terms described herein.</P>
+          <div style={{display:"flex",gap:16,marginTop:20,flexWrap:"wrap"}}>
+            <div style={{flex:1,minWidth:200}}>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Full Name / Title</label>
+              <input value={sigName} onChange={e=>setSigName(e.target.value)} placeholder="Jane Smith, VP of Operations" autoComplete="name" style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
+            </div>
+            <div style={{flex:1,minWidth:200}}>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Date</label>
+              <input type="date" value={sigDate} onChange={e=>setSigDate(e.target.value)} style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
+            </div>
+          </div>
+          <div style={{marginTop:16,display:"flex",gap:8,alignItems:"center"}}>
+            <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Payment method:</span>
+            <button onClick={()=>setPayingWith("card")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
+            <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+              ACH / Bank Transfer {options[selectedOption]?.achEligible ? "(Save $100)" : ""}
+            </button>
+          </div>
+          <button onClick={doAccept} disabled={!sigName||!sigDate||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&!submitting?"pointer":"not-allowed"}}>
+            {submitting?"Submitting...":"Accept Proposal and Pay Deposit"}
+          </button>
+        </>}
+      </div>
+    </div>
+  </div>);
+}
+
 // ─── DASHBOARD ───
 function Dashboard({onBack}) {
   const [data, setData] = useState(null);
@@ -1102,7 +1776,9 @@ function ProposalSearch({onLoad, onBack}) {
 
 function App() {
   const [view,setView] = useState("loading");
+  const [leaseType,setLeaseType] = useState(null);
   const [form,setForm] = useState(loadForm);
+  const [fixedForm,setFixedForm] = useState(loadFixedForm);
   const [ventMapFile,setVentMapFile] = useState(null);
   const [ventMapUrl,setVentMapUrl] = useState(null);
   const [loading,setLoading] = useState(null);
@@ -1111,25 +1787,32 @@ function App() {
   const [taxRate,setTaxRate] = useState(0);
   const [authed,setAuthed] = useState(false);
 
+  const activeForm = leaseType === "fixed" ? fixedForm : form;
+  const setActiveForm = leaseType === "fixed" ? setFixedForm : setForm;
+
   useEffect(()=>{
     const path = window.location.pathname;
     const match = path.match(/^\/proposal\/([a-f0-9]+)$/);
     if(match) {
-      // Client view - no auth needed
       const id = match[1];
       setProposalId(id);
       fetch(`${API}/api/proposal/${id}`).then(r=>r.json()).then(cfg=>{
         const ventFile = cfg._ventMapFilename;
         delete cfg._ventMapFilename; delete cfg._createdAt;
-        setForm(f=>({...f,...cfg}));
+        if(cfg.leaseType === "fixed") {
+          setLeaseType("fixed");
+          setFixedForm(f=>({...f,...cfg}));
+        } else {
+          setLeaseType("performance");
+          setForm(f=>({...f,...cfg}));
+        }
         if(ventFile) setVentMapUrl(`${API}/api/proposal/${id}/ventmap`);
         setAuthed(true);
         setView("client");
-      }).catch(()=>{setView("form");});
+      }).catch(()=>{setView("lease-select");});
     } else {
-      // Builder - check auth
       fetch(`${API}/api/auth/check`).then(r=>r.json()).then(d=>{
-        if(d.authenticated || !d.authRequired) { setAuthed(true); setView("form"); }
+        if(d.authenticated || !d.authRequired) { setAuthed(true); setView("lease-select"); }
         else setView("login");
       }).catch(()=>setView("login"));
     }
@@ -1139,7 +1822,13 @@ function App() {
     if(ventMapFile){const u=URL.createObjectURL(ventMapFile);setVentMapUrl(u);return()=>URL.revokeObjectURL(u);}
   },[ventMapFile]);
 
-  const buildFD=()=>{const fd=new FormData();const cfg={...form,taxRate:String(taxRate)};fd.append("config",JSON.stringify(cfg));if(ventMapFile)fd.append("ventMap",ventMapFile);return fd;};
+  const buildFD=()=>{
+    const fd=new FormData();
+    const cfg={...activeForm, taxRate:String(taxRate), leaseType: leaseType || "performance"};
+    fd.append("config",JSON.stringify(cfg));
+    if(ventMapFile)fd.append("ventMap",ventMapFile);
+    return fd;
+  };
 
   const doPDF=async()=>{
     setLoading("pdf");setResult(null);
@@ -1147,7 +1836,7 @@ function App() {
       const r=await authFetch(`${API}/api/generate-pdf`,{method:"POST",body:buildFD()});
       if(!r.ok)throw new Error("fail");
       const b=await r.blob(),u=URL.createObjectURL(b),a=document.createElement("a");
-      a.href=u;a.download=`ReDry_Proposal_${form.projectName.replace(/\s+/g,"_")}_${form.projectSection.replace(/\s+/g,"_")}.pdf`;
+      a.href=u;a.download=`ReDry_Proposal_${activeForm.projectName.replace(/\s+/g,"_")}_${activeForm.projectSection.replace(/\s+/g,"_")}.pdf`;
       a.click();URL.revokeObjectURL(u);setResult({type:"pdf"});
     }catch(e){alert("Failed to generate PDF.");}
     setLoading(null);
@@ -1164,21 +1853,32 @@ function App() {
   };
 
   if(view==="loading") return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.gray}}>Loading...</div>;
-  if(view==="login") return <LoginScreen onLogin={()=>{setAuthed(true);setView("form");}}/>;
-  if(view==="client") return <ClientView form={form} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
-  if(view==="dashboard") return (<div style={{padding:"40px 20px"}}><Dashboard onBack={()=>setView("form")}/></div>);
-  if(view==="search") return (<div style={{padding:"40px 20px"}}><ProposalSearch onBack={()=>setView("form")} onLoad={(pid)=>{
+  if(view==="login") return <LoginScreen onLogin={()=>{setAuthed(true);setView("lease-select");}}/>;
+  if(view==="lease-select") return <LeaseTypeSelector onSelect={(type)=>{setLeaseType(type);setResult(null);setView("form");}} onSearch={()=>setView("search")} onDashboard={()=>setView("dashboard")}/>;
+  if(view==="client") {
+    if(leaseType==="fixed") return <FixedLeaseClientView form={fixedForm} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
+    return <ClientView form={form} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
+  }
+  if(view==="dashboard") return (<div style={{padding:"40px 20px"}}><Dashboard onBack={()=>setView("lease-select")}/></div>);
+  if(view==="search") return (<div style={{padding:"40px 20px"}}><ProposalSearch onBack={()=>setView("lease-select")} onLoad={(pid)=>{
     authFetch(`${API}/api/proposal/${pid}`).then(r=>r.json()).then(cfg=>{
       const ventFile = cfg._ventMapFilename;
       delete cfg._ventMapFilename; delete cfg._createdAt;
-      setForm(f=>({...f,...cfg}));
+      if(cfg.leaseType === "fixed") {
+        setLeaseType("fixed");
+        setFixedForm(f=>({...f,...cfg}));
+      } else {
+        setLeaseType("performance");
+        setForm(f=>({...f,...cfg}));
+      }
       setProposalId(pid);
       if(ventFile) setVentMapUrl(`${API}/api/proposal/${pid}/ventmap`);
       else { setVentMapUrl(null); setVentMapFile(null); }
       setView("form");
     }).catch(()=>alert("Failed to load proposal."));
   }}/></div>);
-  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} onSetResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate} onSearch={()=>setView("search")} onDashboard={()=>setView("dashboard")}/></div>);
+  if(leaseType==="fixed") return (<div style={{padding:"40px 20px"}}><FixedLeaseBuilder form={fixedForm} setForm={setFixedForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} onSetResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate} onSearch={()=>setView("search")} onDashboard={()=>setView("dashboard")} onBack={()=>setView("lease-select")}/></div>);
+  return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} onSetResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate} onSearch={()=>setView("search")} onDashboard={()=>setView("dashboard")} onBack={()=>setView("lease-select")}/></div>);
 }
 
 class ErrorBoundary extends React.Component {
