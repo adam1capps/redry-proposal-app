@@ -6,7 +6,7 @@ PostgreSQL storage, Stripe payments, SendGrid emails, proposal lifecycle trackin
 
 from flask import Flask, request, jsonify, send_file, send_from_directory, session
 from flask_cors import CORS
-from proposal_generator import generate_proposal_pdf, generate_client_pdf
+from proposal_generator import generate_proposal_pdf, generate_client_pdf, generate_fixed_proposal_pdf, generate_fixed_client_pdf
 import os, io, json, uuid, stripe, traceback, psycopg2, psycopg2.extras, hashlib, secrets, functools
 from datetime import datetime, timezone
 from werkzeug.utils import secure_filename
@@ -260,7 +260,11 @@ def generate_pdf():
             filename = secure_filename(vent_map.filename)
             vent_map_path = os.path.join(UPLOAD_DIR, f"ventmap_{uuid.uuid4().hex[:8]}_{filename}")
             vent_map.save(vent_map_path)
-        pdf_bytes = generate_proposal_pdf(config, logo_path=LOGO_PATH if os.path.exists(LOGO_PATH) else None, vent_map_path=vent_map_path)
+        lease_type = config.get("leaseType", "performance")
+        if lease_type == "fixed":
+            pdf_bytes = generate_fixed_proposal_pdf(config, logo_path=LOGO_PATH if os.path.exists(LOGO_PATH) else None, vent_map_path=vent_map_path)
+        else:
+            pdf_bytes = generate_proposal_pdf(config, logo_path=LOGO_PATH if os.path.exists(LOGO_PATH) else None, vent_map_path=vent_map_path)
         project_name = config.get("projectName", "Project").replace(" ", "_")
         section = config.get("projectSection", "").replace(" ", "_")
         fn = f"ReDry_Proposal_{project_name}_{section}.pdf" if section else f"ReDry_Proposal_{project_name}.pdf"
@@ -291,8 +295,13 @@ def generate_proposal_link():
             ext = os.path.splitext(secure_filename(vent_map.filename))[1]
             vent_map_filename = f"{proposal_id}_ventmap{ext}"
             vent_map.save(os.path.join(PROPOSALS_DIR, vent_map_filename))
-        pdf_bytes = generate_proposal_pdf(config, logo_path=LOGO_PATH if os.path.exists(LOGO_PATH) else None,
-            vent_map_path=os.path.join(PROPOSALS_DIR, vent_map_filename) if vent_map_filename else None)
+        lease_type = config.get("leaseType", "performance")
+        _logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
+        _vmap = os.path.join(PROPOSALS_DIR, vent_map_filename) if vent_map_filename else None
+        if lease_type == "fixed":
+            pdf_bytes = generate_fixed_proposal_pdf(config, logo_path=_logo, vent_map_path=_vmap)
+        else:
+            pdf_bytes = generate_proposal_pdf(config, logo_path=_logo, vent_map_path=_vmap)
         with open(os.path.join(PROPOSALS_DIR, f"{proposal_id}.pdf"), "wb") as f: f.write(pdf_bytes)
         config["_ventMapFilename"] = vent_map_filename
         config["_createdAt"] = datetime.now(timezone.utc).isoformat()
@@ -323,62 +332,118 @@ def send_proposal(pid):
     # Generate client-facing PDF (no pricing) and save it
     vent_map_filename = cfg.get("_ventMapFilename")
     vent_map_path = os.path.join(PROPOSALS_DIR, vent_map_filename) if vent_map_filename else None
-    client_pdf_bytes = generate_client_pdf(cfg, logo_path=LOGO_PATH if os.path.exists(LOGO_PATH) else None,
-        vent_map_path=vent_map_path)
+    _logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
+    lease_type = cfg.get("leaseType", "performance")
+    if lease_type == "fixed":
+        client_pdf_bytes = generate_fixed_client_pdf(cfg, logo_path=_logo, vent_map_path=vent_map_path)
+    else:
+        client_pdf_bytes = generate_client_pdf(cfg, logo_path=_logo, vent_map_path=vent_map_path)
     client_pdf_path = os.path.join(PROPOSALS_DIR, f"{pid}_client.pdf")
     with open(client_pdf_path, "wb") as f: f.write(client_pdf_bytes)
-
-    # Calculate pricing for email summary
-    wet_sf = float(cfg.get("wetSF", 0) or 0)
-    rate = float(cfg.get("ratePSF", 2.0) or 2.0)
-    vent_total = wet_sf * rate
-    tax_rate_val = float(cfg.get("taxRateOverride", "") or cfg.get("taxRate", "") or 0)
-    tax_amount = round(vent_total * tax_rate_val, 2)
-    subtotal = round(vent_total + tax_amount, 2)
-    scan_cost = float(cfg.get("scanCost", 4500) or 4500)
-    num_scans = int(cfg.get("numScans", 4) or 4)
-    waive_scans = cfg.get("waiveScans", False)
-    total_scans = 0 if waive_scans else round(scan_cost * num_scans, 2)
-    grand_total = round(subtotal + total_scans, 2)
-    total_vents = cfg.get("totalVents", "")
-    scan_interval = cfg.get("scanInterval", "3")
-
-    # Payment option visibility
-    show_pay_full = cfg.get("showOption0", False)
-    show_5050 = cfg.get("showOption1", True)
-    show_easy = cfg.get("showOption2", False)
 
     # Format helpers
     def fc(v): return f"${v:,.2f}"
 
-    # 50/50 deposit
-    deposit_50 = round(grand_total / 2, 2)
+    if lease_type == "fixed":
+        # Fixed lease pricing
+        num_vents = int(cfg.get("numVents", 0) or 0)
+        vent_rate = float(cfg.get("ventRate", 1000) or 1000)
+        lease_term = int(cfg.get("leaseTerm", 12) or 12)
+        install_fee = float(cfg.get("installFee", 0) or 0)
+        lease_total = num_vents * vent_rate
+        tax_rate_val = float(cfg.get("taxRateOverride", "") or cfg.get("taxRate", "") or 0)
+        tax_amount = round(lease_total * tax_rate_val, 2)
+        grand_total = round(lease_total + tax_amount + install_fee, 2)
+        deposit_50 = round(grand_total / 2, 2)
 
-    # Build scan line
-    scan_line = ""
-    if not waive_scans:
-        scan_line = f"""<tr><td style="padding:6px 12px;font-size:13px;color:#374151">Moisture Monitoring ({num_scans} scans)</td><td style="padding:6px 12px;font-size:13px;color:#374151;text-align:right">{fc(total_scans)}</td></tr>"""
+        install_line = ""
+        if install_fee > 0:
+            install_line = f'<tr><td style="padding:6px 12px;font-size:13px;color:#374151">Install / Setup Fee</td><td style="padding:6px 12px;font-size:13px;color:#374151;text-align:right">{fc(install_fee)}</td></tr>'
 
-    # Build payment teaser
-    payment_teaser = ""
-    teasers = []
-    if show_pay_full:
-        discount_total = round(grand_total * 0.97, 2)
-        teasers.append(f'<strong>Pay in Full</strong> and save 3% ({fc(discount_total)})')
-    if show_easy:
-        easy_start = round(grand_total * 1.03 * 0.10, 2)
-        teasers.append(f'<strong>Get started for just {fc(easy_start)}</strong> with our Easy Start plan')
-    if teasers:
-        teaser_items = "".join(f'<li style="margin-bottom:4px">{t}</li>' for t in teasers)
-        payment_teaser = f"""
+        subject = f"ReDry Fixed Lease Proposal: {project}{f' - {section}' if section else ''}"
+        html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
+      <div style="background:#1B2A4A;padding:20px;text-align:center">
+        <span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:1px">RE<span style="color:#E8943A">DRY</span></span>
+      </div>
+      <div style="padding:28px;background:#fff;border:1px solid #e2e8f0">
+        <p style="font-size:15px;line-height:1.7;color:#374151">{f'Hi {contact},' if contact else 'Hello,'}</p>
+        <p style="font-size:14px;line-height:1.7;color:#374151">Thank you for the opportunity to work with {company} on <strong>{project}</strong>{f' ({section})' if section else ''}. We appreciate your trust in ReDry to solve the moisture challenges on this roof.</p>
+        <p style="font-size:14px;line-height:1.7;color:#374151">Please find your fixed lease proposal attached and summarized below. You can also review the full details, select your payment option, and accept the proposal online.</p>
+
+        <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
+          <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Lease Summary</p>
+          <table style="width:100%;border-collapse:collapse">
+            <tr><td style="padding:4px 0;font-size:13px;color:#64748b">Project</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{project}{f' - {section}' if section else ''}</td></tr>
+            <tr><td style="padding:4px 0;font-size:13px;color:#64748b">Vents</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{num_vents}</td></tr>
+            <tr><td style="padding:4px 0;font-size:13px;color:#64748b">Rate</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{fc(vent_rate)} / vent</td></tr>
+            <tr><td style="padding:4px 0;font-size:13px;color:#64748b">Lease Term</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{lease_term} months</td></tr>
+          </table>
+        </div>
+
+        <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
+          <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Investment</p>
+          <table style="width:100%;border-collapse:collapse">
+            <tr><td style="padding:6px 12px;font-size:13px;color:#374151">Vent Rental ({num_vents} &times; {fc(vent_rate)})</td><td style="padding:6px 12px;font-size:13px;color:#374151;text-align:right">{fc(lease_total)}</td></tr>
+            {f'<tr><td style="padding:6px 12px;font-size:13px;color:#374151">Rental Tax ({tax_rate_val*100:.2f}%)</td><td style="padding:6px 12px;font-size:13px;color:#374151;text-align:right">{fc(tax_amount)}</td></tr>' if tax_amount > 0 else ''}
+            {install_line}
+            <tr style="border-top:2px solid #1B2A4A"><td style="padding:10px 12px;font-size:15px;font-weight:800;color:#1B2A4A">Total</td><td style="padding:10px 12px;font-size:15px;font-weight:800;color:#1B2A4A;text-align:right">{fc(grand_total)}</td></tr>
+          </table>
+          <p style="font-size:13px;color:#374151;margin:12px 0 0 0;line-height:1.6">Standard terms: <strong>50% deposit</strong> ({fc(deposit_50)}) upon contract execution, with the remaining <strong>50% due at installation</strong>.</p>
+        </div>
+
+        <div style="margin:24px 0;text-align:center">
+          <a href="{proposal_url}" style="display:inline-block;background:#E8943A;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">View &amp; Accept Proposal</a>
+        </div>
+        <p style="font-size:13px;color:#64748b;line-height:1.6">If you have any questions at all, just reply to this email. We're happy to walk through the proposal with you or adjust anything to fit your needs.</p>
+      </div>
+      <div style="padding:16px;text-align:center;font-size:11px;color:#94a3b8">ReDry, LLC | Advancing the Science of Moisture Removal</div>
+    </div>"""
+    else:
+        # Performance lease pricing (existing)
+        wet_sf = float(cfg.get("wetSF", 0) or 0)
+        rate = float(cfg.get("ratePSF", 2.0) or 2.0)
+        vent_total = wet_sf * rate
+        tax_rate_val = float(cfg.get("taxRateOverride", "") or cfg.get("taxRate", "") or 0)
+        tax_amount = round(vent_total * tax_rate_val, 2)
+        subtotal = round(vent_total + tax_amount, 2)
+        scan_cost = float(cfg.get("scanCost", 4500) or 4500)
+        num_scans = int(cfg.get("numScans", 4) or 4)
+        waive_scans = cfg.get("waiveScans", False)
+        total_scans = 0 if waive_scans else round(scan_cost * num_scans, 2)
+        grand_total = round(subtotal + total_scans, 2)
+        total_vents = cfg.get("totalVents", "")
+        scan_interval = cfg.get("scanInterval", "3")
+
+        show_pay_full = cfg.get("showOption0", False)
+        show_5050 = cfg.get("showOption1", True)
+        show_easy = cfg.get("showOption2", False)
+
+        deposit_50 = round(grand_total / 2, 2)
+
+        scan_line = ""
+        if not waive_scans:
+            scan_line = f"""<tr><td style="padding:6px 12px;font-size:13px;color:#374151">Moisture Monitoring ({num_scans} scans)</td><td style="padding:6px 12px;font-size:13px;color:#374151;text-align:right">{fc(total_scans)}</td></tr>"""
+
+        payment_teaser = ""
+        teasers = []
+        if show_pay_full:
+            discount_total = round(grand_total * 0.97, 2)
+            teasers.append(f'<strong>Pay in Full</strong> and save 3% ({fc(discount_total)})')
+        if show_easy:
+            easy_start = round(grand_total * 1.03 * 0.10, 2)
+            teasers.append(f'<strong>Get started for just {fc(easy_start)}</strong> with our Easy Start plan')
+        if teasers:
+            teaser_items = "".join(f'<li style="margin-bottom:4px">{t}</li>' for t in teasers)
+            payment_teaser = f"""
         <div style="margin-top:16px;padding:14px 16px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px">
           <p style="font-size:13px;color:#9A3412;font-weight:700;margin:0 0 6px 0">Additional payment options available:</p>
           <ul style="font-size:13px;color:#374151;margin:0;padding-left:20px;line-height:1.7">{teaser_items}</ul>
           <p style="font-size:12px;color:#9A3412;margin:8px 0 0 0">View the full proposal to see all options.</p>
         </div>"""
 
-    subject = f"ReDry Proposal: {project}{f' - {section}' if section else ''}"
-    html = f"""
+        subject = f"ReDry Proposal: {project}{f' - {section}' if section else ''}"
+        html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
       <div style="background:#1B2A4A;padding:20px;text-align:center">
         <span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:1px">RE<span style="color:#E8943A">DRY</span></span>
