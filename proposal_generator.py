@@ -103,9 +103,9 @@ style_label = ParagraphStyle(
 
 
 def parse_tax_rate(config):
-    """Parse tax rate from config, handling both percentage (e.g. 8.5) and decimal (e.g. 0.085) formats."""
+    """Parse tax rate from config. Always stored as a decimal (e.g. 0.085 for 8.5%)."""
     try:
-        val = float(config.get("taxRateOverride", "") or config.get("taxRate", "") or 0)
+        val = float(config.get("taxRate", "") or 0)
     except (ValueError, TypeError):
         return 0
     if val > 1:
@@ -1308,7 +1308,7 @@ def generate_client_pdf(config, logo_path=None, vent_map_path=None):
     )
     summary_rows.append(
         [Paragraph("Monitoring Duration", style_table_cell_bold),
-         Paragraph(f"Approximately {int(num_scans) * int(scan_interval)} months", style_table_cell)]
+         Paragraph(f"Approximately {num_scans * safe_int(scan_interval, 3)} months", style_table_cell)]
     )
 
     summary_table = Table(summary_rows, colWidths=[usable_width * 0.30, usable_width * 0.70])
@@ -1957,7 +1957,6 @@ if __name__ == "__main__":
         "proposalDate": "2026-02-20",
         "validDays": "30",
         "taxRate": "0.0925",
-        "taxRateOverride": "",
         "waiveScans": False,
         "showOption0": True,
         "showOption1": True,

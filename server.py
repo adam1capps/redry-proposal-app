@@ -7,13 +7,21 @@ PostgreSQL storage, Stripe payments, SendGrid emails, proposal lifecycle trackin
 from flask import Flask, request, jsonify, send_file, send_from_directory, session
 from flask_cors import CORS
 from proposal_generator import generate_proposal_pdf, generate_client_pdf, generate_fixed_proposal_pdf, generate_fixed_client_pdf
-import os, io, json, uuid, stripe, traceback, psycopg2, psycopg2.extras, hashlib, secrets, functools
+import os, io, json, uuid, stripe, traceback, psycopg2, psycopg2.extras, hashlib, secrets, functools, hmac, re
 from datetime import datetime, timezone
+from html import escape as html_escape
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__, static_folder="static")
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
-CORS(app)
+ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "").split(",") if os.environ.get("CORS_ORIGINS") else []
+CORS(app, origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS else ["*"], supports_credentials=True)
+
+_PID_RE = re.compile(r'^[a-f0-9]{6,64}$')
+def validate_pid(pid):
+    if not _PID_RE.match(pid):
+        return None
+    return pid
 
 # ─── Auth ───
 TEAM_PASSWORD = os.environ.get("TEAM_PASSWORD", "")
@@ -27,13 +35,15 @@ def require_auth(f):
         if not TEAM_PASSWORD:
             return f(*args, **kwargs)
         token = request.headers.get("X-Auth-Token") or request.cookies.get("auth_token") or ""
-        if not token or token != session.get("auth_token"):
+        stored = session.get("auth_token", "")
+        if not token or not stored or not hmac.compare_digest(token, stored):
             return jsonify({"error": "Unauthorized"}), 401
         return f(*args, **kwargs)
     return wrapper
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PK = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 GOOGLE_MAPS_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
@@ -56,7 +66,7 @@ def auth_login():
         token = secrets.token_hex(32)
         session["auth_token"] = token
         return jsonify({"ok": True, "token": token})
-    if pw == TEAM_PASSWORD:
+    if hmac.compare_digest(pw, TEAM_PASSWORD):
         token = secrets.token_hex(32)
         session["auth_token"] = token
         return jsonify({"ok": True, "token": token})
@@ -67,7 +77,8 @@ def auth_check():
     if not TEAM_PASSWORD:
         return jsonify({"authenticated": True, "authRequired": False})
     token = request.headers.get("X-Auth-Token") or request.cookies.get("auth_token") or ""
-    if token and token == session.get("auth_token"):
+    stored = session.get("auth_token", "")
+    if token and stored and hmac.compare_digest(token, stored):
         return jsonify({"authenticated": True, "authRequired": True})
     return jsonify({"authenticated": False, "authRequired": True})
 
@@ -227,9 +238,9 @@ STATE_TAX_RATES = {
 OPTION_LABELS = {1: "Pay in Full", 2: "50% Now. 50% at Install.", 3: "Let\u2019s Get Going!"}
 
 def parse_tax_rate(cfg):
-    """Parse tax rate, handling both percentage (e.g. 8.5) and decimal (e.g. 0.085) formats."""
+    """Parse tax rate from config. Always stored as a decimal (e.g. 0.085 for 8.5%)."""
     try:
-        val = float(cfg.get("taxRateOverride", "") or cfg.get("taxRate", "") or 0)
+        val = float(cfg.get("taxRate", "") or 0)
     except (ValueError, TypeError):
         return 0
     if val > 1:
@@ -329,16 +340,17 @@ def generate_proposal_link():
 @app.route("/api/proposal/<pid>/send", methods=["POST"])
 @require_auth
 def send_proposal(pid):
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
     p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
     if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
     with open(p) as f: cfg = json.load(f)
     data = request.get_json() or {}
     to_email = data.get("email") or cfg.get("clientEmail", "")
     if not to_email: return jsonify({"error": "No email address provided"}), 400
-    project = cfg.get("projectName", "Project")
-    company = cfg.get("clientCompany", "Client")
-    contact = cfg.get("clientContact", "")
-    section = cfg.get("projectSection", "")
+    project = html_escape(cfg.get("projectName", "Project"))
+    company = html_escape(cfg.get("clientCompany", "Client"))
+    contact = html_escape(cfg.get("clientContact", ""))
+    section = html_escape(cfg.get("projectSection", ""))
     base_url = request.host_url.rstrip("/")
     proposal_url = f"{base_url}/proposal/{pid}"
     # Generate client-facing PDF (no pricing) and save it
@@ -504,21 +516,22 @@ def send_proposal(pid):
         db_update_status(pid, "sent", "sent_at")
         db_log_event(pid, "sent", {"to": to_email})
         send_email(NOTIFY_EMAILS, f"Proposal Sent: {project} | {company}",
-            f'<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A"><div style="background:#1B2A4A;padding:16px 20px;text-align:center"><span style="color:#fff;font-size:16px;font-weight:700">RE<span style="color:#E8943A">DRY</span></span></div><div style="padding:20px;background:#fff;border:1px solid #e2e8f0"><p style="font-size:14px;color:#374151"><strong>Proposal sent</strong> to {to_email}</p><p style="font-size:13px;color:#64748b">{project} | {company} | {fc(grand_total)}</p><a href="{proposal_url}" style="font-size:13px;color:#E8943A">View proposal</a></div></div>')
+            f'<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A"><div style="background:#1B2A4A;padding:16px 20px;text-align:center"><span style="color:#fff;font-size:16px;font-weight:700">RE<span style="color:#E8943A">DRY</span></span></div><div style="padding:20px;background:#fff;border:1px solid #e2e8f0"><p style="font-size:14px;color:#374151"><strong>Proposal sent</strong> to {html_escape(to_email)}</p><p style="font-size:13px;color:#64748b">{project} | {company} | {fc(grand_total)}</p><a href="{proposal_url}" style="font-size:13px;color:#E8943A">View proposal</a></div></div>')
     return jsonify({"sent": success, "to": to_email})
 
 # ─── Send Proposal for Approval ───
 @app.route("/api/proposal/<pid>/send-for-approval", methods=["POST"])
 @require_auth
 def send_for_approval(pid):
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
     p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
     if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
     with open(p) as f: cfg = json.load(f)
-    company = cfg.get("clientCompany", "Client")
-    project = cfg.get("projectName", "Project")
-    address = cfg.get("projectAddress", "")
-    section = cfg.get("projectSection", "")
-    contact = cfg.get("clientContact", "")
+    company = html_escape(cfg.get("clientCompany", "Client"))
+    project = html_escape(cfg.get("projectName", "Project"))
+    address = html_escape(cfg.get("projectAddress", ""))
+    section = html_escape(cfg.get("projectSection", ""))
+    contact = html_escape(cfg.get("clientContact", ""))
     client_email = cfg.get("clientEmail", "")
     base_url = request.host_url.rstrip("/")
     proposal_url = f"{base_url}/proposal/{pid}"
@@ -576,7 +589,7 @@ def send_for_approval(pid):
             <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Type:</td><td style="color:#1B2A4A;font-weight:600">{'Fixed Lease' if lease_type == 'fixed' else 'Performance Lease'}</td></tr>
             <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Contractor:</td><td style="color:#1B2A4A;font-weight:600">{company}</td></tr>
             {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Contact:</td><td style="color:#1B2A4A">{contact}</td></tr>' if contact else ''}
-            {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Email:</td><td style="color:#1B2A4A">{client_email}</td></tr>' if client_email else ''}
+            {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Email:</td><td style="color:#1B2A4A">{html_escape(client_email)}</td></tr>' if client_email else ''}
             <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Project:</td><td style="color:#1B2A4A;font-weight:600">{project}{f' - {section}' if section else ''}</td></tr>
             <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Address:</td><td style="color:#1B2A4A">{address}</td></tr>
           </table>
@@ -607,6 +620,7 @@ def send_for_approval(pid):
 # ─── Proposal Data & Assets ───
 @app.route("/api/proposal/<pid>")
 def get_proposal_config(pid):
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
     cfg = None
     p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
     if os.path.exists(p):
@@ -633,18 +647,21 @@ def get_proposal_config(pid):
 
 @app.route("/api/proposal/<pid>/pdf")
 def get_proposal_pdf(pid):
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
     p = os.path.join(PROPOSALS_DIR, f"{pid}.pdf")
     if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
     return send_file(p, mimetype="application/pdf")
 
 @app.route("/api/proposal/<pid>/client-pdf")
 def get_client_pdf(pid):
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
     p = os.path.join(PROPOSALS_DIR, f"{pid}_client.pdf")
     if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
     return send_file(p, mimetype="application/pdf")
 
 @app.route("/api/proposal/<pid>/ventmap")
 def get_proposal_ventmap(pid):
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
     p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
     if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
     with open(p) as f: cfg = json.load(f)
@@ -655,6 +672,7 @@ def get_proposal_ventmap(pid):
 # ─── Accept / Sign Proposal ───
 @app.route("/api/proposal/<pid>/accept", methods=["POST"])
 def accept_proposal(pid):
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
     p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
     if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
     accepted_path = os.path.join(PROPOSALS_DIR, f"{pid}_accepted.json")
@@ -682,9 +700,9 @@ def accept_proposal(pid):
     pdf_bytes = None
     if os.path.exists(pdf_path):
         with open(pdf_path, "rb") as f: pdf_bytes = f.read()
-    project = cfg.get("projectName", "Project"); company = cfg.get("clientCompany", "Client")
-    contact = cfg.get("clientContact", ""); client_email = cfg.get("clientEmail", "")
-    section = cfg.get("projectSection", ""); signer = acc.get("name", "Unknown")
+    project = html_escape(cfg.get("projectName", "Project")); company = html_escape(cfg.get("clientCompany", "Client"))
+    contact = html_escape(cfg.get("clientContact", "")); client_email = cfg.get("clientEmail", "")
+    section = html_escape(cfg.get("projectSection", "")); signer = html_escape(acc.get("name", "Unknown"))
     option_num = acc.get("selectedOption", "?"); option_label = OPTION_LABELS.get(option_num, f"Option {option_num}")
     base_url = request.host_url.rstrip("/")
     admin_html = f"""
@@ -696,11 +714,11 @@ def accept_proposal(pid):
           <tr><td style="font-weight:700;padding-right:16px;white-space:nowrap">Project:</td><td>{project}{f' - {section}' if section else ''}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Client:</td><td>{company}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Signed By:</td><td>{signer}</td></tr>
-          <tr><td style="font-weight:700;padding-right:16px">Date Signed:</td><td>{acc.get('date','')}</td></tr>
+          <tr><td style="font-weight:700;padding-right:16px">Date Signed:</td><td>{html_escape(acc.get('date',''))}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Payment Option:</td><td>{option_label}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Signed At (UTC):</td><td>{now.strftime('%B %d, %Y at %I:%M %p UTC')}</td></tr>
-          <tr><td style="font-weight:700;padding-right:16px">IP Address:</td><td style="font-size:12px;color:#64748b">{sig_proof['ipAddress']}</td></tr>
-          <tr><td style="font-weight:700;padding-right:16px">User Agent:</td><td style="font-size:11px;color:#94a3b8">{sig_proof['userAgent'][:120]}</td></tr>
+          <tr><td style="font-weight:700;padding-right:16px">IP Address:</td><td style="font-size:12px;color:#64748b">{html_escape(sig_proof['ipAddress'])}</td></tr>
+          <tr><td style="font-weight:700;padding-right:16px">User Agent:</td><td style="font-size:11px;color:#94a3b8">{html_escape(sig_proof['userAgent'][:120])}</td></tr>
         </table>
         <div style="margin-top:20px;padding:12px;background:#f8fafc;border-radius:6px;font-size:13px;color:#64748b">The signed proposal PDF is attached. This email serves as confirmation that the above individual electronically accepted this proposal.</div>
         <div style="margin-top:16px;text-align:center"><a href="{base_url}/proposal/{pid}" style="display:inline-block;background:#E8943A;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:700">View Proposal</a></div>
@@ -735,7 +753,11 @@ def create_checkout_session():
         data = request.get_json()
         amount_cents = int(data.get("amountCents", 0))
         if amount_cents <= 0: return jsonify({"error": "Invalid amount"}), 400
-        proposal_id = data.get("proposalId", ""); option = data.get("option", 2)
+        proposal_id = data.get("proposalId", "")
+        if not validate_pid(proposal_id): return jsonify({"error": "Invalid proposal ID"}), 400
+        p = os.path.join(PROPOSALS_DIR, f"{proposal_id}.json")
+        if not os.path.exists(p): return jsonify({"error": "Proposal not found"}), 404
+        option = data.get("option", 2)
         payment_number = data.get("paymentNumber", 1); description = data.get("description", "ReDry Vent System Lease")
         payment_method = data.get("paymentMethod", "card")
         client_company = data.get("clientCompany", ""); project_name = data.get("projectName", "")
@@ -745,7 +767,7 @@ def create_checkout_session():
             "payment_method_types": pmt_types,
             "line_items": [{"price_data": {"currency": "usd", "product_data": {"name": description, "description": f"{project_name} | {client_company}"}, "unit_amount": amount_cents}, "quantity": 1}],
             "mode": "payment",
-            "success_url": f"{base_url}/proposal/{proposal_id}?payment=success&option={option}&pmt={payment_number}&amt={amount_cents}&method={payment_method}",
+            "success_url": f"{base_url}/proposal/{proposal_id}?payment=success&option={option}&pmt={payment_number}&amt={amount_cents}&method={payment_method}&session_id={{CHECKOUT_SESSION_ID}}",
             "cancel_url": f"{base_url}/proposal/{proposal_id}?payment=cancelled",
             "metadata": {"proposal_id": proposal_id, "option": str(option), "payment_number": str(payment_number)},
         }
@@ -757,29 +779,33 @@ def create_checkout_session():
         return jsonify({"error": str(e)}), 500
 
 # ─── Payment Confirmation ───
-@app.route("/api/proposal/<pid>/payment-confirm", methods=["POST"])
-def payment_confirm(pid):
-    p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
-    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
-    with open(p) as f: cfg = json.load(f)
-    data = request.get_json() or {}; now = datetime.now(timezone.utc)
-    option = data.get("option", 1); payment_number = data.get("paymentNumber", 1)
-    amount = data.get("amount", 0); method = data.get("method", "card")
+def _record_payment(pid, cfg, option, payment_number, amount, method, ip_address="", stripe_session_id=""):
+    """Shared logic for recording a verified payment. Called from both the API route and webhook."""
+    if stripe_session_id and DATABASE_URL:
+        try:
+            conn = get_db(); cur = conn.cursor()
+            cur.execute("SELECT 1 FROM payments WHERE stripe_session_id = %s", (stripe_session_id,))
+            if cur.fetchone():
+                conn.close()
+                return False
+            conn.close()
+        except Exception as e: print(f"DB error (idempotency check): {e}")
+    now = datetime.now(timezone.utc)
     option_label = OPTION_LABELS.get(option, f"Option {option}")
     payment_labels = {1: "Deposit", 2: "Install Payment", 3: "Final Payment"}
     if option == 1: payment_labels = {1: "Full Payment"}
     elif option == 2: payment_labels = {1: "Deposit (50%)", 2: "Balance (50%)"}
     elif option == 3: payment_labels = {1: "Deposit (10%)", 2: "Install Payment (40%)", 3: "Final Payment (50%)"}
     pmt_label = payment_labels.get(payment_number, f"Payment {payment_number}")
-    project = cfg.get("projectName", "Project"); company = cfg.get("clientCompany", "Client")
-    client_email = cfg.get("clientEmail", ""); section = cfg.get("projectSection", "")
+    project = html_escape(cfg.get("projectName", "Project")); company = html_escape(cfg.get("clientCompany", "Client"))
+    client_email = cfg.get("clientEmail", ""); section = html_escape(cfg.get("projectSection", ""))
     db_store_payment(pid, {"proposalId": pid, "option": option, "optionLabel": option_label, "paymentNumber": payment_number,
         "paymentLabel": pmt_label, "amountCents": amount, "method": method, "paidAtUTC": now.isoformat(),
-        "ipAddress": request.headers.get("X-Forwarded-For", request.remote_addr)})
+        "ipAddress": ip_address, "stripeSessionId": stripe_session_id})
     db_update_status(pid, "paid", "paid_at")
     db_log_event(pid, "payment", {"option": option, "paymentNumber": payment_number, "amountCents": amount, "method": method})
     amt_str = f"${amount/100:,.2f}" if amount else "Amount pending"
-    base_url = request.host_url.rstrip("/")
+    base_url = os.environ.get("BASE_URL", "https://redry-proposal-app.onrender.com")
     admin_html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
       <div style="background:#1B2A4A;padding:20px;text-align:center"><span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:1px">RE<span style="color:#E8943A">DRY</span></span></div>
@@ -816,7 +842,67 @@ def payment_confirm(pid):
           <div style="padding:16px;text-align:center;font-size:11px;color:#94a3b8">ReDry, LLC | Advancing the Science of Moisture Removal</div>
         </div>"""
         send_email([client_email], f"Payment Receipt: {project} | {pmt_label}", client_html)
-    return jsonify({"status": "confirmed", "paidAt": now.isoformat()})
+
+@app.route("/api/proposal/<pid>/payment-confirm", methods=["POST"])
+def payment_confirm(pid):
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
+    p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
+    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
+    with open(p) as f: cfg = json.load(f)
+    data = request.get_json() or {}
+    session_id = data.get("sessionId", "")
+    if session_id and stripe.api_key:
+        try:
+            sess = stripe.checkout.Session.retrieve(session_id)
+            if sess.payment_status != "paid":
+                return jsonify({"error": "Payment not completed"}), 400
+            meta = sess.metadata or {}
+            if meta.get("proposal_id") != pid:
+                return jsonify({"error": "Session does not match proposal"}), 400
+            option = int(meta.get("option", data.get("option", 1)))
+            payment_number = int(meta.get("payment_number", data.get("paymentNumber", 1)))
+            amount = sess.amount_total or 0
+            method = "ach" if any(pt == "us_bank_account" for pt in (sess.payment_method_types or [])) else "card"
+        except Exception as e:
+            print(f"Stripe session verify error: {e}")
+            return jsonify({"error": "Could not verify payment"}), 400
+    elif not stripe.api_key:
+        option = data.get("option", 1); payment_number = data.get("paymentNumber", 1)
+        amount = data.get("amount", 0); method = data.get("method", "card")
+    else:
+        return jsonify({"error": "Missing session ID"}), 400
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    recorded = _record_payment(pid, cfg, option, payment_number, amount, method, ip, session_id)
+    if recorded is False:
+        return jsonify({"status": "already_recorded"})
+    return jsonify({"status": "confirmed"})
+
+@app.route("/api/stripe-webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.get_data(as_text=True)
+    sig = request.headers.get("Stripe-Signature", "")
+    if not STRIPE_WEBHOOK_SECRET:
+        return jsonify({"error": "Webhook not configured"}), 400
+    try:
+        event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+    except (ValueError, stripe.error.SignatureVerificationError) as e:
+        print(f"Webhook signature verification failed: {e}")
+        return jsonify({"error": "Invalid signature"}), 400
+    if event["type"] == "checkout.session.completed":
+        sess = event["data"]["object"]
+        meta = sess.get("metadata", {})
+        pid = meta.get("proposal_id", "")
+        if pid and validate_pid(pid):
+            p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
+            if os.path.exists(p):
+                with open(p) as f: cfg = json.load(f)
+                option = int(meta.get("option", 1))
+                payment_number = int(meta.get("payment_number", 1))
+                amount = sess.get("amount_total", 0) or 0
+                method = "ach" if "us_bank_account" in (sess.get("payment_method_types") or []) else "card"
+                stripe_sid = sess.get("id", "")
+                _record_payment(pid, cfg, option, payment_number, amount, method, stripe_session_id=stripe_sid)
+    return jsonify({"received": True}), 200
 
 # ─── Proposal List / Dashboard ───
 @app.route("/api/proposals")
@@ -853,6 +939,7 @@ def list_proposals():
 @app.route("/api/proposal/<pid>/events")
 @require_auth
 def get_proposal_events(pid):
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
     if not DATABASE_URL: return jsonify([])
     try:
         conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -937,13 +1024,7 @@ def backfill_tax_rates():
                 continue
             # Look up rate from state
             state = (cfg.get("projectState") or "").upper().strip()
-            override = cfg.get("taxRateOverride", "")
-            if override:
-                try:
-                    rate = float(override) / 100
-                except (ValueError, TypeError):
-                    rate = 0
-            elif state in STATE_TAX_RATES:
+            if state in STATE_TAX_RATES:
                 rate = STATE_TAX_RATES[state]
             else:
                 rate = 0
