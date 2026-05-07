@@ -238,9 +238,9 @@ STATE_TAX_RATES = {
 OPTION_LABELS = {1: "Pay in Full", 2: "50% Now. 50% at Install.", 3: "Let\u2019s Get Going!"}
 
 def parse_tax_rate(cfg):
-    """Parse tax rate, handling both percentage (e.g. 8.5) and decimal (e.g. 0.085) formats."""
+    """Parse tax rate from config. Always stored as a decimal (e.g. 0.085 for 8.5%)."""
     try:
-        val = float(cfg.get("taxRateOverride", "") or cfg.get("taxRate", "") or 0)
+        val = float(cfg.get("taxRate", "") or 0)
     except (ValueError, TypeError):
         return 0
     if val > 1:
@@ -1008,13 +1008,7 @@ def backfill_tax_rates():
                 continue
             # Look up rate from state
             state = (cfg.get("projectState") or "").upper().strip()
-            override = cfg.get("taxRateOverride", "")
-            if override:
-                try:
-                    rate = float(override) / 100
-                except (ValueError, TypeError):
-                    rate = 0
-            elif state in STATE_TAX_RATES:
+            if state in STATE_TAX_RATES:
                 rate = STATE_TAX_RATES[state]
             else:
                 rate = 0

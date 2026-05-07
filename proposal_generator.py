@@ -103,9 +103,9 @@ style_label = ParagraphStyle(
 
 
 def parse_tax_rate(config):
-    """Parse tax rate from config, handling both percentage (e.g. 8.5) and decimal (e.g. 0.085) formats."""
+    """Parse tax rate from config. Always stored as a decimal (e.g. 0.085 for 8.5%)."""
     try:
-        val = float(config.get("taxRateOverride", "") or config.get("taxRate", "") or 0)
+        val = float(config.get("taxRate", "") or 0)
     except (ValueError, TypeError):
         return 0
     if val > 1:
@@ -1957,7 +1957,6 @@ if __name__ == "__main__":
         "proposalDate": "2026-02-20",
         "validDays": "30",
         "taxRate": "0.0925",
-        "taxRateOverride": "",
         "waiveScans": False,
         "showOption0": True,
         "showOption1": True,
