@@ -454,6 +454,7 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
         <Inp label="Number of Scans" value={form.numScans} onChange={s("numScans")} type="number" third/>
         <Inp label="Scan Interval" value={form.scanInterval} onChange={s("scanInterval")} suffix="months" type="number" third/>
         <Inp label="Proposal Date" value={form.proposalDate} onChange={s("proposalDate")} type="date" third/>
+        <Inp label="Valid Days" value={form.validDays} onChange={s("validDays")} suffix="days" type="number" third/>
       </div>
 
       <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-end",marginBottom:4}}>
@@ -538,7 +539,7 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
           <div style={{display:"flex",gap:8,alignItems:"center",marginTop:4}}>
             <button onClick={()=>setForm(f=>({...f,customOptionPayments:[...(f.customOptionPayments||[]),{pct:"",label:"",due:""}]}))}
               style={{padding:"6px 14px",border:`1px solid ${C.orange}`,borderRadius:4,background:"#fff",color:C.orange,fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Add Payment</button>
-            <span style={{fontSize:11,color:C.gray}}>Total: {(form.customOptionPayments||[]).reduce((s,p)=>s+(parseFloat(p.pct)||0),0)}% (should equal 100%)</span>
+            {(()=>{const t=(form.customOptionPayments||[]).reduce((s,p)=>s+(parseFloat(p.pct)||0),0); return <span style={{fontSize:11,color:t===100?C.green:"#dc2626",fontWeight:t===100?400:600}}>Total: {t}% {t!==100?"(must equal 100%)":"&#10003;"}</span>;})()}
           </div>
         </div>}
 
@@ -622,20 +623,15 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
               placeholder="client@company.com" type="email"
               style={{flex:"1 1 200px",padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,color:C.dark,background:"#fff",outline:"none"}}/>
             <button onClick={async()=>{
-              console.log("SEND CLICKED", result.proposalId, result.sendEmail, form.clientEmail);
               const email = result.sendEmail||form.clientEmail;
               if(!email){alert("Enter an email address"); return;}
               onSetResult(r=>({...r,sending:true}));
               try{
-                const url = `${API}/api/proposal/${result.proposalId}/send`;
-                console.log("SENDING TO", url, email);
-                const res = await authFetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
-                console.log("RESPONSE STATUS", res.status);
+                const res = await authFetch(`${API}/api/proposal/${result.proposalId}/send`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
                 const d = await res.json();
-                console.log("RESPONSE DATA", d);
                 if(d.sent) onSetResult(r=>({...r,emailSent:true,sending:false,sentTo:email}));
                 else {alert("Failed to send: "+(d.error||"Unknown error")); onSetResult(r=>({...r,sending:false}));}
-              }catch(e){console.error("SEND ERROR",e); alert("Error sending email: "+e.message); onSetResult(r=>({...r,sending:false}));}
+              }catch(e){ alert("Error sending email. Please try again."); onSetResult(r=>({...r,sending:false}));}
             }} disabled={result.sending}
               style={{padding:"8px 20px",border:"none",borderRadius:6,background:result.sending?"#cbd5e1":C.orange,color:"#fff",fontSize:13,fontWeight:700,cursor:result.sending?"wait":"pointer",whiteSpace:"nowrap"}}>
               {result.sending?"Sending...":"Send to Client"}
@@ -858,7 +854,7 @@ function FixedLeaseBuilder({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink
           <div style={{display:"flex",gap:8,alignItems:"center",marginTop:4}}>
             <button onClick={()=>setForm(f=>({...f,customOptionPayments:[...(f.customOptionPayments||[]),{pct:"",label:"",due:""}]}))}
               style={{padding:"6px 14px",border:`1px solid ${C.orange}`,borderRadius:4,background:"#fff",color:C.orange,fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Add Payment</button>
-            <span style={{fontSize:11,color:C.gray}}>Total: {(form.customOptionPayments||[]).reduce((s,p)=>s+(parseFloat(p.pct)||0),0)}% (should equal 100%)</span>
+            {(()=>{const t=(form.customOptionPayments||[]).reduce((s,p)=>s+(parseFloat(p.pct)||0),0); return <span style={{fontSize:11,color:t===100?C.green:"#dc2626",fontWeight:t===100?400:600}}>Total: {t}% {t!==100?"(must equal 100%)":"&#10003;"}</span>;})()}
           </div>
         </div>}
 
@@ -1075,9 +1071,10 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
         const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption+1})});
         if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
+        if(!r.ok){ alert("Failed to submit acceptance. Please try again."); setSubmitting(false); return; }
       }
       setAccepted(true);
-    }catch(e){setAccepted(true);}
+    }catch(e){ alert("Network error. Please check your connection and try again."); }
     setSubmitting(false);
   };
 
@@ -1375,9 +1372,10 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
         const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption+1})});
         if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
+        if(!r.ok){ alert("Failed to submit acceptance. Please try again."); setSubmitting(false); return; }
       }
       setAccepted(true);
-    }catch(e){setAccepted(true);}
+    }catch(e){ alert("Network error. Please check your connection and try again."); }
     setSubmitting(false);
   };
 
@@ -1834,8 +1832,8 @@ function App() {
   },[ventMapFile]);
 
   const doLogout=()=>{
-    fetch(`${API}/api/auth/logout`,{method:"POST",credentials:"include"}).finally(()=>{
-      setAuthed(false);setView("login");
+    authFetch(`${API}/api/auth/logout`,{method:"POST"}).finally(()=>{
+      _authToken="";setAuthed(false);setView("login");
     });
   };
 
@@ -1848,7 +1846,16 @@ function App() {
     return fd;
   };
 
+  const validateForm=()=>{
+    if(activeForm.showCustomOption){
+      const t=(activeForm.customOptionPayments||[]).reduce((s,p)=>s+(parseFloat(p.pct)||0),0);
+      if(t!==100){alert(`Custom option payment percentages must equal 100% (currently ${t}%).`);return false;}
+    }
+    return true;
+  };
+
   const doPDF=async()=>{
+    if(!validateForm())return;
     setLoading("pdf");setResult(null);
     try{
       const r=await authFetch(`${API}/api/generate-pdf`,{method:"POST",body:buildFD()});
@@ -1861,6 +1868,7 @@ function App() {
   };
 
   const doLink=async()=>{
+    if(!validateForm())return;
     setLoading("link");setResult(null);
     try{
       const r=await authFetch(`${API}/api/generate-proposal-link`,{method:"POST",body:buildFD()});

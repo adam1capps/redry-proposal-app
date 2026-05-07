@@ -113,6 +113,24 @@ def parse_tax_rate(config):
     return val
 
 
+def safe_float(val, default=0):
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+def safe_int(val, default=0):
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
+
+def safe_parse_date(date_str, fmt="%Y-%m-%d"):
+    try:
+        return datetime.strptime(date_str, fmt)
+    except (ValueError, TypeError):
+        return datetime.now()
+
 def fmt_currency(val):
     return "${:,.2f}".format(val)
 
@@ -163,10 +181,10 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
     project_zip = config.get("projectZip", "")
     project_section = config.get("projectSection", "")
     
-    wet_sf = int(float(config.get("wetSF", 0)))
-    rate_psf = float(config.get("ratePSF", 2.00))
-    scan_cost = float(config.get("scanCost", 4500))
-    num_scans = int(float(config.get("numScans", 4)))
+    wet_sf = safe_int(config.get("wetSF", 0))
+    rate_psf = safe_float(config.get("ratePSF", 2.00), 2.00)
+    scan_cost = safe_float(config.get("scanCost", 4500), 4500)
+    num_scans = safe_int(config.get("numScans", 4), 4)
     scan_interval = config.get("scanInterval", "3")
     total_vents = config.get("totalVents", "")
     waive_scans = config.get("waiveScans", False)
@@ -181,14 +199,14 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
     show_option_2 = config.get("showOption2", False)  # Easy Start
     show_custom_option = config.get("showCustomOption", False)
     custom_option_label = config.get("customOptionLabel", "Custom")
-    custom_option_adj = float(config.get("customOptionAdj", 0) or 0) / 100
+    custom_option_adj = safe_float(config.get("customOptionAdj", 0) or 0) / 100
     custom_option_payments = config.get("customOptionPayments", [])
-    
+
     # Proposal link for online acceptance
     proposal_id = config.get("_proposalId", "")
-    
+
     proposal_date_str = config.get("proposalDate", datetime.now().strftime("%Y-%m-%d"))
-    valid_days = int(config.get("validDays", 30))
+    valid_days = safe_int(config.get("validDays", 30), 30)
     
     # Compute values
     full_address_parts = [project_address]
@@ -231,10 +249,10 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
     custom_total = round(custom_vent_adjusted + custom_tax, 2)
     custom_pmts = []
     for cp in custom_option_payments:
-        pct = float(cp.get("pct", 0) or 0) / 100
+        pct = safe_float(cp.get("pct", 0) or 0) / 100
         custom_pmts.append((cp.get("label", "Payment"), round(custom_total * pct, 2), cp.get("due", "")))
-    
-    proposal_date = datetime.strptime(proposal_date_str, "%Y-%m-%d")
+
+    proposal_date = safe_parse_date(proposal_date_str)
     proposal_date_display = proposal_date.strftime("%B %d, %Y").replace(" 0", " ")
     valid_through_date = proposal_date + timedelta(days=valid_days)
     valid_through = valid_through_date.strftime("%B %d, %Y").replace(" 0", " ")
@@ -800,7 +818,7 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
          "ReDry's commissioning visit will be scheduled following completion of the contractor's installation. In the event of weather "
          "delays, the project schedule will be adjusted accordingly at no additional cost."),
         ("4.9  Proposal Validity",
-         f"This proposal is valid for thirty (30) days from the date of issue ({valid_through}). "
+         f"This proposal is valid for {valid_days} days from the date of issue ({valid_through}). "
          "Pricing is subject to revision after that date."),
     ]
     for title, text in conditions:
@@ -931,15 +949,15 @@ def generate_client_pdf(config, logo_path=None, vent_map_path=None):
     project_zip = config.get("projectZip", "")
     project_section = config.get("projectSection", "")
 
-    wet_sf = int(float(config.get("wetSF", 0)))
-    num_scans = int(float(config.get("numScans", 4)))
+    wet_sf = safe_int(config.get("wetSF", 0))
+    num_scans = safe_int(config.get("numScans", 4), 4)
     scan_interval = config.get("scanInterval", "3")
     total_vents = config.get("totalVents", "")
 
     proposal_id = config.get("_proposalId", "")
 
     proposal_date_str = config.get("proposalDate", datetime.now().strftime("%Y-%m-%d"))
-    valid_days = int(config.get("validDays", 30))
+    valid_days = safe_int(config.get("validDays", 30), 30)
 
     # Compute values
     full_address_parts = [project_address]
@@ -950,7 +968,7 @@ def generate_client_pdf(config, logo_path=None, vent_map_path=None):
         full_address_parts.append(city_state_zip)
     full_address = ", ".join(full_address_parts)
 
-    proposal_date = datetime.strptime(proposal_date_str, "%Y-%m-%d")
+    proposal_date = safe_parse_date(proposal_date_str)
     proposal_date_display = proposal_date.strftime("%B %d, %Y").replace(" 0", " ")
     valid_through_date = proposal_date + timedelta(days=valid_days)
     valid_through = valid_through_date.strftime("%B %d, %Y").replace(" 0", " ")
@@ -1443,10 +1461,10 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
     project_zip = config.get("projectZip", "")
     project_section = config.get("projectSection", "")
 
-    num_vents = int(float(config.get("numVents", 0) or 0))
-    vent_rate = float(config.get("ventRate", 1000) or 1000)
-    lease_term = int(float(config.get("leaseTerm", 12) or 12))
-    install_fee = float(config.get("installFee", 0) or 0)
+    num_vents = safe_int(config.get("numVents", 0) or 0)
+    vent_rate = safe_float(config.get("ventRate", 1000) or 1000, 1000)
+    lease_term = safe_int(config.get("leaseTerm", 12) or 12, 12)
+    install_fee = safe_float(config.get("installFee", 0) or 0)
 
     tax_rate_val = parse_tax_rate(config)
 
@@ -1455,12 +1473,12 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
     show_option_2 = config.get("showOption2", False)
     show_custom_option = config.get("showCustomOption", False)
     custom_option_label = config.get("customOptionLabel", "Custom")
-    custom_option_adj = float(config.get("customOptionAdj", 0) or 0) / 100
+    custom_option_adj = safe_float(config.get("customOptionAdj", 0) or 0) / 100
     custom_option_payments = config.get("customOptionPayments", [])
 
     proposal_id = config.get("_proposalId", "")
     proposal_date_str = config.get("proposalDate", datetime.now().strftime("%Y-%m-%d"))
-    valid_days = int(config.get("validDays", 30))
+    valid_days = safe_int(config.get("validDays", 30), 30)
 
     full_address_parts = [project_address]
     city_state_zip = ", ".join(filter(None, [project_city, project_state]))
@@ -1496,10 +1514,10 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
     custom_total = round(custom_adjusted + custom_tax + install_fee, 2)
     custom_pmts = []
     for cp in custom_option_payments:
-        pct = float(cp.get("pct", 0) or 0) / 100
+        pct = safe_float(cp.get("pct", 0) or 0) / 100
         custom_pmts.append((cp.get("label", "Payment"), round(custom_total * pct, 2), cp.get("due", "")))
 
-    proposal_date = datetime.strptime(proposal_date_str, "%Y-%m-%d")
+    proposal_date = safe_parse_date(proposal_date_str)
     proposal_date_display = proposal_date.strftime("%B %d, %Y").replace(" 0", " ")
     valid_through_date = proposal_date + timedelta(days=valid_days)
     valid_through = valid_through_date.strftime("%B %d, %Y").replace(" 0", " ")
@@ -1674,7 +1692,7 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
         ("4.4 Equipment Ownership", "All ReDry Vent heads remain the sole property of ReDry, LLC throughout the lease period."),
         ("4.5 Lease Term", f"The lease term is {lease_term} months from the date of installation. Vents will be retrieved at the conclusion of the lease term or upon meeting performance criteria."),
         ("4.6 Access", "The client shall provide safe, unobstructed access to the roof area during commissioning and scheduled inspections."),
-        ("4.7 Proposal Validity", f"This proposal is valid for thirty (30) days from date of issue ({valid_through})."),
+        ("4.7 Proposal Validity", f"This proposal is valid for {valid_days} days from date of issue ({valid_through})."),
     ]
     for title, text in conditions:
         story.append(Paragraph(f"<b>{title}.</b>&nbsp;&nbsp;{text}", style_body))
@@ -1735,12 +1753,12 @@ def generate_fixed_client_pdf(config, logo_path=None, vent_map_path=None):
     project_zip = config.get("projectZip", "")
     project_section = config.get("projectSection", "")
 
-    num_vents = int(float(config.get("numVents", 0) or 0))
-    lease_term = int(float(config.get("leaseTerm", 12) or 12))
+    num_vents = safe_int(config.get("numVents", 0) or 0)
+    lease_term = safe_int(config.get("leaseTerm", 12) or 12, 12)
 
     proposal_id = config.get("_proposalId", "")
     proposal_date_str = config.get("proposalDate", datetime.now().strftime("%Y-%m-%d"))
-    valid_days = int(config.get("validDays", 30))
+    valid_days = safe_int(config.get("validDays", 30), 30)
 
     full_address_parts = [project_address]
     city_state_zip = ", ".join(filter(None, [project_city, project_state]))
@@ -1750,7 +1768,7 @@ def generate_fixed_client_pdf(config, logo_path=None, vent_map_path=None):
         full_address_parts.append(city_state_zip)
     full_address = ", ".join(full_address_parts)
 
-    proposal_date = datetime.strptime(proposal_date_str, "%Y-%m-%d")
+    proposal_date = safe_parse_date(proposal_date_str)
     proposal_date_display = proposal_date.strftime("%B %d, %Y").replace(" 0", " ")
     valid_through_date = proposal_date + timedelta(days=valid_days)
     valid_through = valid_through_date.strftime("%B %d, %Y").replace(" 0", " ")
