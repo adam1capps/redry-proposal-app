@@ -72,7 +72,7 @@ function LoginScreen({onLogin}) {
 }
 
 // ─── Lease Type Selector ───
-function LeaseTypeSelector({onSelect, onSearch, onDashboard}) {
+function LeaseTypeSelector({onSelect, onSearch, onDashboard, onLogout}) {
   const [hover, setHover] = useState(null);
   const card = (type, hovered) => ({
     flex:"1 1 300px", maxWidth:400, background:"#fff", borderRadius:12,
@@ -102,6 +102,7 @@ function LeaseTypeSelector({onSelect, onSearch, onDashboard}) {
       <div style={{textAlign:"center",marginTop:24,display:"flex",gap:12,justifyContent:"center"}}>
         <button onClick={onSearch} style={{background:"none",border:"none",color:C.gray,fontSize:13,cursor:"pointer",textDecoration:"underline"}}>Past Proposals</button>
         <button onClick={onDashboard} style={{background:"none",border:"none",color:C.gray,fontSize:13,cursor:"pointer",textDecoration:"underline"}}>Dashboard</button>
+        {onLogout && <button onClick={onLogout} style={{background:"none",border:"none",color:"#dc2626",fontSize:13,cursor:"pointer",textDecoration:"underline"}}>Logout</button>}
       </div>
     </div>
   </div>);
@@ -992,9 +993,9 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   // Use saved taxRate from proposal config (includes tax in client-facing prices)
   const savedTaxRate = (() => {
     const ov = parseFloat(form.taxRateOverride);
-    if(!isNaN(ov) && ov > 0) return ov / 100;
+    if(!isNaN(ov) && ov > 0) return ov > 1 ? ov / 100 : ov;
     const saved = parseFloat(form.taxRate);
-    if(!isNaN(saved) && saved > 0) return saved;
+    if(!isNaN(saved) && saved > 0) return saved > 1 ? saved / 100 : saved;
     return 0;
   })();
   const [taxRate,setTaxRate]=useState(savedTaxRate);
@@ -1070,8 +1071,11 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
     if(!sigName||!sigDate||selectedOption===null)return;
     setSubmitting(true);
     try{
-      if(proposalId) await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption+1})});
+      if(proposalId) {
+        const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption+1})});
+        if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
+      }
       setAccepted(true);
     }catch(e){setAccepted(true);}
     setSubmitting(false);
@@ -1292,9 +1296,9 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
   const [checkoutLoading,setCheckoutLoading]=useState(false);
   const savedTaxRate = (() => {
     const ov = parseFloat(form.taxRateOverride);
-    if(!isNaN(ov) && ov > 0) return ov / 100;
+    if(!isNaN(ov) && ov > 0) return ov > 1 ? ov / 100 : ov;
     const saved = parseFloat(form.taxRate);
-    if(!isNaN(saved) && saved > 0) return saved;
+    if(!isNaN(saved) && saved > 0) return saved > 1 ? saved / 100 : saved;
     return 0;
   })();
   const [taxRate,setTaxRate]=useState(savedTaxRate);
@@ -1367,8 +1371,11 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
     if(!sigName||!sigDate||selectedOption===null)return;
     setSubmitting(true);
     try{
-      if(proposalId) await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption+1})});
+      if(proposalId) {
+        const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption+1})});
+        if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
+      }
       setAccepted(true);
     }catch(e){setAccepted(true);}
     setSubmitting(false);
@@ -1796,7 +1803,11 @@ function App() {
     if(match) {
       const id = match[1];
       setProposalId(id);
-      fetch(`${API}/api/proposal/${id}`).then(r=>r.json()).then(cfg=>{
+      fetch(`${API}/api/proposal/${id}`).then(r=>{
+        if(!r.ok) throw new Error("not found");
+        return r.json();
+      }).then(cfg=>{
+        if(cfg.error) throw new Error(cfg.error);
         const ventFile = cfg._ventMapFilename;
         delete cfg._ventMapFilename; delete cfg._createdAt;
         if(cfg.leaseType === "fixed") {
@@ -1809,7 +1820,7 @@ function App() {
         if(ventFile) setVentMapUrl(`${API}/api/proposal/${id}/ventmap`);
         setAuthed(true);
         setView("client");
-      }).catch(()=>{setView("lease-select");});
+      }).catch(()=>{setView("not-found");});
     } else {
       fetch(`${API}/api/auth/check`).then(r=>r.json()).then(d=>{
         if(d.authenticated || !d.authRequired) { setAuthed(true); setView("lease-select"); }
@@ -1822,9 +1833,16 @@ function App() {
     if(ventMapFile){const u=URL.createObjectURL(ventMapFile);setVentMapUrl(u);return()=>URL.revokeObjectURL(u);}
   },[ventMapFile]);
 
+  const doLogout=()=>{
+    fetch(`${API}/api/auth/logout`,{method:"POST",credentials:"include"}).finally(()=>{
+      setAuthed(false);setView("login");
+    });
+  };
+
   const buildFD=()=>{
     const fd=new FormData();
     const cfg={...activeForm, taxRate:String(taxRate), leaseType: leaseType || "performance"};
+    if(cfg.taxRateOverride) cfg.taxRateOverride = String(parseFloat(cfg.taxRateOverride)/100);
     fd.append("config",JSON.stringify(cfg));
     if(ventMapFile)fd.append("ventMap",ventMapFile);
     return fd;
@@ -1853,8 +1871,15 @@ function App() {
   };
 
   if(view==="loading") return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.gray}}>Loading...</div>;
+  if(view==="not-found") return (<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg}}>
+    <div style={{textAlign:"center",padding:40}}>
+      <div style={{width:72,height:72,borderRadius:"50%",background:"#fef2f2",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",fontSize:32,color:"#dc2626"}}>!</div>
+      <h1 style={{fontSize:24,fontWeight:800,color:C.navy,fontFamily:"'Playfair Display',serif"}}>Proposal Not Found</h1>
+      <p style={{color:C.gray,fontSize:14,marginTop:8,lineHeight:1.6}}>This proposal link may be invalid or expired.</p>
+    </div>
+  </div>);
   if(view==="login") return <LoginScreen onLogin={()=>{setAuthed(true);setView("lease-select");}}/>;
-  if(view==="lease-select") return <LeaseTypeSelector onSelect={(type)=>{setLeaseType(type);setResult(null);setView("form");}} onSearch={()=>setView("search")} onDashboard={()=>setView("dashboard")}/>;
+  if(view==="lease-select") return <LeaseTypeSelector onSelect={(type)=>{setLeaseType(type);setResult(null);setView("form");}} onSearch={()=>setView("search")} onDashboard={()=>setView("dashboard")} onLogout={doLogout}/>;
   if(view==="client") {
     if(leaseType==="fixed") return <FixedLeaseClientView form={fixedForm} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
     return <ClientView form={form} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
