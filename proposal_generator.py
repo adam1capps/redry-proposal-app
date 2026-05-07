@@ -102,6 +102,17 @@ style_label = ParagraphStyle(
 )
 
 
+def parse_tax_rate(config):
+    """Parse tax rate from config, handling both percentage (e.g. 8.5) and decimal (e.g. 0.085) formats."""
+    try:
+        val = float(config.get("taxRateOverride", "") or config.get("taxRate", "") or 0)
+    except (ValueError, TypeError):
+        return 0
+    if val > 1:
+        val = val / 100
+    return val
+
+
 def fmt_currency(val):
     return "${:,.2f}".format(val)
 
@@ -162,12 +173,7 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
     hide_scans = config.get("hideScans", False)
     hide_pricing = config.get("hidePricing", False)
 
-    # Tax rate
-    tax_rate_val = 0
-    try:
-        tax_rate_val = float(config.get("taxRateOverride", "") or config.get("taxRate", "") or 0)
-    except (ValueError, TypeError):
-        pass
+    tax_rate_val = parse_tax_rate(config)
 
     # Payment option visibility
     show_option_0 = config.get("showOption0", False)  # Pay in Full
@@ -818,8 +824,9 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
 
     # Online acceptance box
     if proposal_id:
-        proposal_url = f"https://redry-proposal-app.onrender.com/proposal/{proposal_id}"
-        
+        base_url = config.get("_baseUrl", "https://redry-proposal-app.onrender.com")
+        proposal_url = f"{base_url}/proposal/{proposal_id}"
+
         # Clean CTA with orange button
         cta_small = ParagraphStyle('CTASmall', parent=style_small, alignment=TA_CENTER, fontSize=9, spaceAfter=0, textColor=MED_GRAY)
         btn_text = ParagraphStyle('BtnText', fontName='Helvetica-Bold', fontSize=14, leading=18,
@@ -1335,7 +1342,8 @@ def generate_client_pdf(config, logo_path=None, vent_map_path=None):
 
     # Online acceptance box
     if proposal_id:
-        proposal_url = f"https://redry-proposal-app.onrender.com/proposal/{proposal_id}"
+        base_url = config.get("_baseUrl", "https://redry-proposal-app.onrender.com")
+        proposal_url = f"{base_url}/proposal/{proposal_id}"
 
         cta_small = ParagraphStyle('CTASmall', parent=style_small, alignment=TA_CENTER, fontSize=9, spaceAfter=0, textColor=MED_GRAY)
         btn_text = ParagraphStyle('BtnText', fontName='Helvetica-Bold', fontSize=14, leading=18,
@@ -1440,11 +1448,7 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
     lease_term = int(float(config.get("leaseTerm", 12) or 12))
     install_fee = float(config.get("installFee", 0) or 0)
 
-    tax_rate_val = 0
-    try:
-        tax_rate_val = float(config.get("taxRateOverride", "") or config.get("taxRate", "") or 0)
-    except (ValueError, TypeError):
-        pass
+    tax_rate_val = parse_tax_rate(config)
 
     show_option_0 = config.get("showOption0", False)
     show_option_1 = config.get("showOption1", True)
@@ -1684,7 +1688,8 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
     story.append(Paragraph("To accept this proposal, please review and sign at the link below:", style_body))
     story.append(Spacer(1, 8))
     if proposal_id:
-        story.append(Paragraph(f'<a href="https://proposals.re-dry.com/proposal/{proposal_id}" color="#E8943A"><b>View &amp; Accept Proposal Online</b></a>', style_body))
+        base_url = config.get("_baseUrl", "https://redry-proposal-app.onrender.com")
+        story.append(Paragraph(f'<a href="{base_url}/proposal/{proposal_id}" color="#E8943A"><b>View &amp; Accept Proposal Online</b></a>', style_body))
     story.append(Spacer(1, 12))
 
     # Vent map
@@ -1882,7 +1887,8 @@ def generate_fixed_client_pdf(config, logo_path=None, vent_map_path=None):
     story.append(Paragraph("To review the full proposal with pricing details and accept online:", style_body))
     story.append(Spacer(1, 8))
     if proposal_id:
-        story.append(Paragraph(f'<a href="https://proposals.re-dry.com/proposal/{proposal_id}" color="#E8943A"><b>View Full Proposal &amp; Accept Online</b></a>', style_body))
+        base_url = config.get("_baseUrl", "https://redry-proposal-app.onrender.com")
+        story.append(Paragraph(f'<a href="{base_url}/proposal/{proposal_id}" color="#E8943A"><b>View Full Proposal &amp; Accept Online</b></a>', style_body))
     story.append(Spacer(1, 12))
 
     # Vent map

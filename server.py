@@ -209,7 +209,17 @@ STATE_TAX_RATES = {
 }
 OPTION_LABELS = {1: "Pay in Full", 2: "50% Now. 50% at Install.", 3: "Let\u2019s Get Going!"}
 
-# ─── API Routes ───
+def parse_tax_rate(cfg):
+    """Parse tax rate, handling both percentage (e.g. 8.5) and decimal (e.g. 0.085) formats."""
+    try:
+        val = float(cfg.get("taxRateOverride", "") or cfg.get("taxRate", "") or 0)
+    except (ValueError, TypeError):
+        return 0
+    if val > 1:
+        val = val / 100
+    return val
+
+#─── API Routes ───
 @app.route("/api/tax-rate")
 def get_tax_rate():
     state = request.args.get("state", "").upper().strip()
@@ -243,6 +253,7 @@ def generate_pdf():
             filename = secure_filename(vent_map.filename)
             vent_map_path = os.path.join(UPLOAD_DIR, f"ventmap_{uuid.uuid4().hex[:8]}_{filename}")
             vent_map.save(vent_map_path)
+        config["_baseUrl"] = request.host_url.rstrip("/")
         lease_type = config.get("leaseType", "performance")
         if lease_type == "fixed":
             pdf_bytes = generate_fixed_proposal_pdf(config, logo_path=LOGO_PATH if os.path.exists(LOGO_PATH) else None, vent_map_path=vent_map_path)
@@ -278,6 +289,7 @@ def generate_proposal_link():
             ext = os.path.splitext(secure_filename(vent_map.filename))[1]
             vent_map_filename = f"{proposal_id}_ventmap{ext}"
             vent_map.save(os.path.join(PROPOSALS_DIR, vent_map_filename))
+        config["_baseUrl"] = request.host_url.rstrip("/")
         lease_type = config.get("leaseType", "performance")
         _logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
         _vmap = os.path.join(PROPOSALS_DIR, vent_map_filename) if vent_map_filename else None
@@ -313,6 +325,7 @@ def send_proposal(pid):
     base_url = request.host_url.rstrip("/")
     proposal_url = f"{base_url}/proposal/{pid}"
     # Generate client-facing PDF (no pricing) and save it
+    cfg["_baseUrl"] = base_url
     vent_map_filename = cfg.get("_ventMapFilename")
     vent_map_path = os.path.join(PROPOSALS_DIR, vent_map_filename) if vent_map_filename else None
     _logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
@@ -334,7 +347,7 @@ def send_proposal(pid):
         lease_term = int(cfg.get("leaseTerm", 12) or 12)
         install_fee = float(cfg.get("installFee", 0) or 0)
         lease_total = num_vents * vent_rate
-        tax_rate_val = float(cfg.get("taxRateOverride", "") or cfg.get("taxRate", "") or 0)
+        tax_rate_val = parse_tax_rate(cfg)
         tax_amount = round(lease_total * tax_rate_val, 2)
         grand_total = round(lease_total + tax_amount + install_fee, 2)
         deposit_50 = round(grand_total / 2, 2)
@@ -387,7 +400,7 @@ def send_proposal(pid):
         wet_sf = float(cfg.get("wetSF", 0) or 0)
         rate = float(cfg.get("ratePSF", 2.0) or 2.0)
         vent_total = wet_sf * rate
-        tax_rate_val = float(cfg.get("taxRateOverride", "") or cfg.get("taxRate", "") or 0)
+        tax_rate_val = parse_tax_rate(cfg)
         tax_amount = round(vent_total * tax_rate_val, 2)
         subtotal = round(vent_total + tax_amount, 2)
         scan_cost = float(cfg.get("scanCost", 4500) or 4500)
@@ -494,18 +507,39 @@ def send_for_approval(pid):
     proposal_url = f"{base_url}/proposal/{pid}"
 
     # Calculate pricing for summary
-    wet_sf = float(cfg.get("wetSF", 0) or 0)
-    rate = float(cfg.get("ratePSF", 2.0) or 2.0)
-    vent_total = wet_sf * rate
-    tax_rate_val = float(cfg.get("taxRateOverride", "") or cfg.get("taxRate", "") or 0)
-    tax_amount = round(vent_total * tax_rate_val, 2)
-    subtotal = round(vent_total + tax_amount, 2)
-    scan_cost = float(cfg.get("scanCost", 4500) or 4500)
-    num_scans = int(cfg.get("numScans", 4) or 4)
-    waive_scans = cfg.get("waiveScans", False)
-    total_scans = 0 if waive_scans else round(scan_cost * num_scans, 2)
-    grand_total = round(subtotal + total_scans, 2)
+    lease_type = cfg.get("leaseType", "performance")
+    tax_rate_val = parse_tax_rate(cfg)
     def fc(v): return f"${v:,.2f}"
+
+    if lease_type == "fixed":
+        num_vents = int(cfg.get("numVents", 0) or 0)
+        vent_rate = float(cfg.get("ventRate", 1000) or 1000)
+        lease_term = int(cfg.get("leaseTerm", 12) or 12)
+        install_fee = float(cfg.get("installFee", 0) or 0)
+        lease_total = num_vents * vent_rate
+        tax_amount = round(lease_total * tax_rate_val, 2)
+        grand_total = round(lease_total + tax_amount + install_fee, 2)
+        pricing_rows = f'<tr><td style="padding:4px 12px;font-size:13px;color:#374151">Vent Rental ({num_vents} × {fc(vent_rate)})</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(lease_total)}</td></tr>'
+        if tax_amount > 0:
+            pricing_rows += f'<tr><td style="padding:4px 12px;font-size:13px;color:#374151">Tax ({tax_rate_val*100:.2f}%)</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(tax_amount)}</td></tr>'
+        if install_fee > 0:
+            pricing_rows += f'<tr><td style="padding:4px 12px;font-size:13px;color:#374151">Install / Setup Fee</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(install_fee)}</td></tr>'
+    else:
+        wet_sf = float(cfg.get("wetSF", 0) or 0)
+        rate = float(cfg.get("ratePSF", 2.0) or 2.0)
+        vent_total = wet_sf * rate
+        tax_amount = round(vent_total * tax_rate_val, 2)
+        subtotal = round(vent_total + tax_amount, 2)
+        scan_cost = float(cfg.get("scanCost", 4500) or 4500)
+        num_scans = int(cfg.get("numScans", 4) or 4)
+        waive_scans = cfg.get("waiveScans", False)
+        total_scans = 0 if waive_scans else round(scan_cost * num_scans, 2)
+        grand_total = round(subtotal + total_scans, 2)
+        pricing_rows = f'<tr><td style="padding:4px 12px;font-size:13px;color:#374151">ReDry Vent System ({wet_sf:,.0f} SF @ {fc(rate)}/SF)</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(vent_total)}</td></tr>'
+        if tax_amount > 0:
+            pricing_rows += f'<tr><td style="padding:4px 12px;font-size:13px;color:#374151">Tax ({tax_rate_val*100:.2f}%)</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(tax_amount)}</td></tr>'
+        if not waive_scans:
+            pricing_rows += f'<tr><td style="padding:4px 12px;font-size:13px;color:#374151">Monitoring ({num_scans} scans)</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(total_scans)}</td></tr>'
 
     subject = f"APPROVAL REQUESTED: {company} | {address}"
     html = f"""
@@ -522,6 +556,7 @@ def send_for_approval(pid):
         <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
           <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Proposal Details</p>
           <table style="width:100%;border-collapse:collapse;font-size:13px;line-height:1.8">
+            <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Type:</td><td style="color:#1B2A4A;font-weight:600">{'Fixed Lease' if lease_type == 'fixed' else 'Performance Lease'}</td></tr>
             <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Contractor:</td><td style="color:#1B2A4A;font-weight:600">{company}</td></tr>
             {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Contact:</td><td style="color:#1B2A4A">{contact}</td></tr>' if contact else ''}
             {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Email:</td><td style="color:#1B2A4A">{client_email}</td></tr>' if client_email else ''}
@@ -533,9 +568,7 @@ def send_for_approval(pid):
         <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
           <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Pricing Summary</p>
           <table style="width:100%;border-collapse:collapse">
-            <tr><td style="padding:4px 12px;font-size:13px;color:#374151">ReDry Vent System ({wet_sf:,.0f} SF @ {fc(rate)}/SF)</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(vent_total)}</td></tr>
-            {f'<tr><td style="padding:4px 12px;font-size:13px;color:#374151">Tax ({tax_rate_val*100:.2f}%)</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(tax_amount)}</td></tr>' if tax_amount > 0 else ''}
-            {f'<tr><td style="padding:4px 12px;font-size:13px;color:#374151">Monitoring ({num_scans} scans)</td><td style="padding:4px 12px;font-size:13px;color:#374151;text-align:right">{fc(total_scans)}</td></tr>' if not waive_scans else ''}
+            {pricing_rows}
             <tr style="border-top:2px solid #1B2A4A"><td style="padding:10px 12px;font-size:15px;font-weight:800;color:#1B2A4A">Total</td><td style="padding:10px 12px;font-size:15px;font-weight:800;color:#1B2A4A;text-align:right">{fc(grand_total)}</td></tr>
           </table>
         </div>
@@ -607,6 +640,8 @@ def get_proposal_ventmap(pid):
 def accept_proposal(pid):
     p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
     if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
+    accepted_path = os.path.join(PROPOSALS_DIR, f"{pid}_accepted.json")
+    if os.path.exists(accepted_path): return jsonify({"error": "already_accepted", "status": "accepted"}), 409
     with open(p) as f: cfg = json.load(f)
     acc = request.get_json()
     now = datetime.now(timezone.utc)
