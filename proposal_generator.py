@@ -1308,7 +1308,7 @@ def generate_client_pdf(config, logo_path=None, vent_map_path=None):
     )
     summary_rows.append(
         [Paragraph("Monitoring Duration", style_table_cell_bold),
-         Paragraph(f"Approximately {int(num_scans) * int(scan_interval)} months", style_table_cell)]
+         Paragraph(f"Approximately {num_scans * safe_int(scan_interval, 3)} months", style_table_cell)]
     )
 
     summary_table = Table(summary_rows, colWidths=[usable_width * 0.30, usable_width * 0.70])
