@@ -1047,12 +1047,12 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   };
 
   const doAccept = async()=>{
-    if(!sigName||!sigDate||selectedOption===null)return;
+    if(!sigName||!sigDate||(selectedOption===null && !form.hidePricing))return;
     setSubmitting(true);
     try{
       if(proposalId) {
         const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption+1})});
+          body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption!==null?selectedOption+1:null})});
         if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
         if(!r.ok){ alert("Failed to submit acceptance. Please try again."); setSubmitting(false); return; }
       }
@@ -1223,7 +1223,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           ["4.5 Warranty","System warranty activation requires complete photo documentation, passed QC inspection, and installation by a qualified roofing contractor."],
           ["4.6 Equipment Ownership","All ReDry Vent heads remain the sole property of ReDry, LLC throughout the lease period."],
           ["4.7 Access","The client shall provide safe, unobstructed access to the roof area during commissioning and each scheduled scan."],
-          ["4.8 Proposal Validity",`This proposal is valid for thirty (30) days from date of issue (${vt}).`],
+          ["4.8 Proposal Validity",`This proposal is valid for ${parseInt(form.validDays)||30} days from date of issue (${vt}).`],
         ].map(([t,x])=><p key={t} style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"10px 0",textAlign:"justify"}}><strong style={{color:C.navy}}>{t}.</strong>&nbsp;&nbsp;{x}</p>)}
       </div>
       {ventMapUrl && <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
@@ -1343,12 +1343,12 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
   };
 
   const doAccept = async()=>{
-    if(!sigName||!sigDate||selectedOption===null)return;
+    if(!sigName||!sigDate||(selectedOption===null && !form.hidePricing))return;
     setSubmitting(true);
     try{
       if(proposalId) {
         const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption+1})});
+          body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption!==null?selectedOption+1:null})});
         if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
         if(!r.ok){ alert("Failed to submit acceptance. Please try again."); setSubmitting(false); return; }
       }
@@ -1498,7 +1498,7 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
           ["4.4 Equipment Ownership","All ReDry Vent heads remain the sole property of ReDry, LLC throughout the lease period."],
           ["4.5 Lease Term",`The lease term is ${leaseTerm} months from the date of installation. Vents will be retrieved at the conclusion of the lease term or upon meeting performance criteria.`],
           ["4.6 Access","The client shall provide safe, unobstructed access to the roof area during commissioning and scheduled inspections."],
-          ["4.7 Proposal Validity",`This proposal is valid for thirty (30) days from date of issue (${vt}).`],
+          ["4.7 Proposal Validity",`This proposal is valid for ${parseInt(form.validDays)||30} days from date of issue (${vt}).`],
         ].map(([t,x])=><p key={t} style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"10px 0",textAlign:"justify"}}><strong style={{color:C.navy}}>{t}.</strong>&nbsp;&nbsp;{x}</p>)}
       </div>
       {ventMapUrl && <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>

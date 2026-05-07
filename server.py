@@ -589,7 +589,7 @@ def send_for_approval(pid):
             <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Type:</td><td style="color:#1B2A4A;font-weight:600">{'Fixed Lease' if lease_type == 'fixed' else 'Performance Lease'}</td></tr>
             <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Contractor:</td><td style="color:#1B2A4A;font-weight:600">{company}</td></tr>
             {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Contact:</td><td style="color:#1B2A4A">{contact}</td></tr>' if contact else ''}
-            {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Email:</td><td style="color:#1B2A4A">{client_email}</td></tr>' if client_email else ''}
+            {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Email:</td><td style="color:#1B2A4A">{html_escape(client_email)}</td></tr>' if client_email else ''}
             <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Project:</td><td style="color:#1B2A4A;font-weight:600">{project}{f' - {section}' if section else ''}</td></tr>
             <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Address:</td><td style="color:#1B2A4A">{address}</td></tr>
           </table>
@@ -753,7 +753,11 @@ def create_checkout_session():
         data = request.get_json()
         amount_cents = int(data.get("amountCents", 0))
         if amount_cents <= 0: return jsonify({"error": "Invalid amount"}), 400
-        proposal_id = data.get("proposalId", ""); option = data.get("option", 2)
+        proposal_id = data.get("proposalId", "")
+        if not validate_pid(proposal_id): return jsonify({"error": "Invalid proposal ID"}), 400
+        p = os.path.join(PROPOSALS_DIR, f"{proposal_id}.json")
+        if not os.path.exists(p): return jsonify({"error": "Proposal not found"}), 404
+        option = data.get("option", 2)
         payment_number = data.get("paymentNumber", 1); description = data.get("description", "ReDry Vent System Lease")
         payment_method = data.get("paymentMethod", "card")
         client_company = data.get("clientCompany", ""); project_name = data.get("projectName", "")
@@ -775,8 +779,17 @@ def create_checkout_session():
         return jsonify({"error": str(e)}), 500
 
 # ─── Payment Confirmation ───
-def _record_payment(pid, cfg, option, payment_number, amount, method, ip_address=""):
+def _record_payment(pid, cfg, option, payment_number, amount, method, ip_address="", stripe_session_id=""):
     """Shared logic for recording a verified payment. Called from both the API route and webhook."""
+    if stripe_session_id and DATABASE_URL:
+        try:
+            conn = get_db(); cur = conn.cursor()
+            cur.execute("SELECT 1 FROM payments WHERE stripe_session_id = %s", (stripe_session_id,))
+            if cur.fetchone():
+                conn.close()
+                return False
+            conn.close()
+        except Exception as e: print(f"DB error (idempotency check): {e}")
     now = datetime.now(timezone.utc)
     option_label = OPTION_LABELS.get(option, f"Option {option}")
     payment_labels = {1: "Deposit", 2: "Install Payment", 3: "Final Payment"}
@@ -788,7 +801,7 @@ def _record_payment(pid, cfg, option, payment_number, amount, method, ip_address
     client_email = cfg.get("clientEmail", ""); section = html_escape(cfg.get("projectSection", ""))
     db_store_payment(pid, {"proposalId": pid, "option": option, "optionLabel": option_label, "paymentNumber": payment_number,
         "paymentLabel": pmt_label, "amountCents": amount, "method": method, "paidAtUTC": now.isoformat(),
-        "ipAddress": ip_address})
+        "ipAddress": ip_address, "stripeSessionId": stripe_session_id})
     db_update_status(pid, "paid", "paid_at")
     db_log_event(pid, "payment", {"option": option, "paymentNumber": payment_number, "amountCents": amount, "method": method})
     amt_str = f"${amount/100:,.2f}" if amount else "Amount pending"
@@ -859,7 +872,9 @@ def payment_confirm(pid):
     else:
         return jsonify({"error": "Missing session ID"}), 400
     ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-    _record_payment(pid, cfg, option, payment_number, amount, method, ip)
+    recorded = _record_payment(pid, cfg, option, payment_number, amount, method, ip, session_id)
+    if recorded is False:
+        return jsonify({"status": "already_recorded"})
     return jsonify({"status": "confirmed"})
 
 @app.route("/api/stripe-webhook", methods=["POST"])
@@ -885,7 +900,8 @@ def stripe_webhook():
                 payment_number = int(meta.get("payment_number", 1))
                 amount = sess.get("amount_total", 0) or 0
                 method = "ach" if "us_bank_account" in (sess.get("payment_method_types") or []) else "card"
-                _record_payment(pid, cfg, option, payment_number, amount, method)
+                stripe_sid = sess.get("id", "")
+                _record_payment(pid, cfg, option, payment_number, amount, method, stripe_session_id=stripe_sid)
     return jsonify({"received": True}), 200
 
 # ─── Proposal List / Dashboard ───
