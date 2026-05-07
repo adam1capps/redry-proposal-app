@@ -1008,6 +1008,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
     const params = new URLSearchParams(window.location.search);
     if(params.get("payment")==="success") {
       setPaymentSuccess(true);
+      const sessionId = params.get("session_id")||"";
       const opt = parseInt(params.get("option"))||1;
       const pmt = parseInt(params.get("pmt"))||1;
       const amt = parseInt(params.get("amt"))||0;
@@ -1015,10 +1016,9 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
       if(proposalId) {
         fetch(`${API}/api/proposal/${proposalId}/payment-confirm`, {
           method:"POST", headers:{"Content-Type":"application/json"},
-          body: JSON.stringify({option:opt, paymentNumber:pmt, amount:amt, method:method})
+          body: JSON.stringify({sessionId, option:opt, paymentNumber:pmt, amount:amt, method:method})
         }).catch(()=>{});
       }
-      // Clean URL params
       window.history.replaceState({}, "", window.location.pathname);
     }
   },[]);
@@ -1312,6 +1312,7 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
     const params = new URLSearchParams(window.location.search);
     if(params.get("payment")==="success") {
       setPaymentSuccess(true);
+      const sessionId = params.get("session_id")||"";
       const opt = parseInt(params.get("option"))||1;
       const pmt = parseInt(params.get("pmt"))||1;
       const amt = parseInt(params.get("amt"))||0;
@@ -1319,7 +1320,7 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
       if(proposalId) {
         fetch(`${API}/api/proposal/${proposalId}/payment-confirm`, {
           method:"POST", headers:{"Content-Type":"application/json"},
-          body: JSON.stringify({option:opt, paymentNumber:pmt, amount:amt, method:method})
+          body: JSON.stringify({sessionId, option:opt, paymentNumber:pmt, amount:amt, method:method})
         }).catch(()=>{});
       }
       window.history.replaceState({}, "", window.location.pathname);
