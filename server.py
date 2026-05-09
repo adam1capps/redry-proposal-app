@@ -407,6 +407,10 @@ def send_proposal(pid):
         if install_fee > 0:
             install_line = f'<tr><td style="padding:6px 12px;font-size:13px;color:#374151">Install / Setup Fee</td><td style="padding:6px 12px;font-size:13px;color:#374151;text-align:right">{fc(install_fee)}</td></tr>'
 
+        ship_addr_parts = [html_escape(cfg.get("shipAddress", "")), ", ".join(filter(None, [html_escape(cfg.get("shipCity", "")), html_escape(cfg.get("shipState", ""))])), html_escape(cfg.get("shipZip", ""))]
+        full_ship_addr = ", ".join(filter(None, ship_addr_parts))
+        ship_row = f'<tr><td style="padding:4px 0;font-size:13px;color:#64748b">Ship To</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{full_ship_addr}</td></tr>' if full_ship_addr else ''
+
         subject = f"ReDry Fixed Lease Proposal: {project}{f' - {section}' if section else ''}"
         html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
@@ -425,6 +429,7 @@ def send_proposal(pid):
             <tr><td style="padding:4px 0;font-size:13px;color:#64748b">Vents</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{num_vents}</td></tr>
             <tr><td style="padding:4px 0;font-size:13px;color:#64748b">Rate</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{fc(vent_rate)} / vent</td></tr>
             <tr><td style="padding:4px 0;font-size:13px;color:#64748b">Lease Term</td><td style="padding:4px 0;font-size:13px;color:#1B2A4A;font-weight:600;text-align:right">{lease_term} months</td></tr>
+            {ship_row}
           </table>
         </div>
 
