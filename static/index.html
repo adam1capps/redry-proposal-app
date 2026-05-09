@@ -809,16 +809,24 @@ function FixedLeaseBuilder({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink
         </div>
       </div>}
 
-      <SecLabel>Vent Placement Map</SecLabel>
-      <div onClick={()=>fileRef.current?.click()}
-        onDragOver={e=>{e.preventDefault();e.stopPropagation()}}
-        onDrop={e=>{e.preventDefault();e.stopPropagation();const f=e.dataTransfer.files[0];if(f&&f.type.startsWith("image/"))setVentMapFile(f)}}
-        style={{border:`2px dashed ${ventMapFile?C.orange:C.border}`,borderRadius:8,padding:24,textAlign:"center",cursor:"pointer",background:ventMapFile?"#fef7ed":"#fff"}}>
+      {ventMapFile ? <>
+        <SecLabel>Vent Placement Map</SecLabel>
+        <div onClick={()=>fileRef.current?.click()}
+          style={{border:`2px dashed ${C.orange}`,borderRadius:8,padding:24,textAlign:"center",cursor:"pointer",background:"#fef7ed"}}>
+          <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&setVentMapFile(e.target.files[0])}/>
+          <div style={{fontSize:13,fontWeight:600,color:C.orange}}>&#10003; {ventMapFile.name}</div>
+          <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:6}}>
+            <span style={{fontSize:12,color:C.gray}}>Click to replace</span>
+            <span style={{fontSize:12,color:C.red,cursor:"pointer",textDecoration:"underline"}} onClick={e=>{e.stopPropagation();setVentMapFile(null);}}>Remove</span>
+          </div>
+        </div>
+      </> : <div style={{marginTop:16}}>
+        <button onClick={()=>fileRef.current?.click()}
+          style={{background:"none",border:`1px dashed ${C.border}`,borderRadius:6,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:600,color:C.gray}}>
+          + Add Vent Placement Map (optional)
+        </button>
         <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&setVentMapFile(e.target.files[0])}/>
-        {ventMapFile
-          ? <div><div style={{fontSize:13,fontWeight:600,color:C.orange}}>&#10003; {ventMapFile.name}</div><div style={{fontSize:12,color:C.gray,marginTop:4}}>Click or drop to replace</div></div>
-          : <div><div style={{fontSize:28,marginBottom:4}}>&#128206;</div><div style={{fontSize:13,fontWeight:600,color:C.navy}}>Drop vent placement map here</div><div style={{fontSize:12,color:C.gray,marginTop:4}}>or click to browse (PNG, JPG)</div></div>}
-      </div>
+      </div>}
     </div>
 
     <div style={{display:"flex",gap:12,marginTop:20}}>
