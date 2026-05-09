@@ -115,6 +115,8 @@ def init_db():
         cur.execute("""CREATE TABLE IF NOT EXISTS proposal_events (
             id SERIAL PRIMARY KEY, proposal_id TEXT REFERENCES proposals(id),
             event_type TEXT, details JSONB, created_at TIMESTAMPTZ DEFAULT NOW())""")
+        cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS payments_stripe_session_unique
+            ON payments(stripe_session_id) WHERE stripe_session_id IS NOT NULL AND stripe_session_id != ''""")
         conn.close()
         print("PostgreSQL: Tables ready.")
     except Exception as e:
@@ -142,6 +144,21 @@ def db_update_status(pid, status, ts_field=None):
         conn.close()
     except Exception as e: print(f"DB error (update_status): {e}")
 
+_STATUS_ORDER = {"draft": 0, "sent": 1, "viewed": 2, "signed": 3, "paid": 4}
+def db_update_status_if_earlier(pid, status, ts_field=None):
+    """Only update status if the new status is later in the lifecycle."""
+    if not DATABASE_URL: return
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("SELECT status FROM proposals WHERE id=%s", (pid,))
+        row = cur.fetchone()
+        if row and _STATUS_ORDER.get(row[0], -1) >= _STATUS_ORDER.get(status, 0):
+            conn.close()
+            return
+        conn.close()
+        db_update_status(pid, status, ts_field)
+    except Exception as e: print(f"DB error (update_status_if_earlier): {e}")
+
 def db_log_event(pid, event_type, details=None):
     if not DATABASE_URL: return
     try:
@@ -164,16 +181,22 @@ def db_store_signature(pid, sig_data):
     except Exception as e: print(f"DB error (store_signature): {e}")
 
 def db_store_payment(pid, pmt_data):
-    if not DATABASE_URL: return
+    if not DATABASE_URL: return True
     try:
         conn = get_db(); cur = conn.cursor()
+        sid = pmt_data.get("stripeSessionId") or None
         cur.execute("""INSERT INTO payments (proposal_id, option_num, payment_number, amount_cents,
-                       method, stripe_session_id, details) VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                       method, stripe_session_id, details) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT DO NOTHING""",
                     (pid, pmt_data.get("option"), pmt_data.get("paymentNumber"),
                      pmt_data.get("amountCents"), pmt_data.get("method"),
-                     pmt_data.get("stripeSessionId"), json.dumps(pmt_data)))
+                     sid, json.dumps(pmt_data)))
+        inserted = cur.rowcount > 0
         conn.close()
-    except Exception as e: print(f"DB error (store_payment): {e}")
+        return inserted
+    except Exception as e:
+        print(f"DB error (store_payment): {e}")
+        return False
 
 # ─── Email (SendGrid) ───
 def send_email(to_emails, subject, html_body, attachments=None, reply_to=None):
@@ -379,7 +402,6 @@ def send_proposal(pid):
         tax_rate_val = parse_tax_rate(cfg)
         tax_amount = round(lease_total * tax_rate_val, 2)
         grand_total = round(lease_total + tax_amount + install_fee, 2)
-        deposit_50 = round(grand_total / 2, 2)
 
         install_line = ""
         if install_fee > 0:
@@ -394,7 +416,7 @@ def send_proposal(pid):
       <div style="padding:28px;background:#fff;border:1px solid #e2e8f0">
         <p style="font-size:15px;line-height:1.7;color:#374151">{f'Hi {contact},' if contact else 'Hello,'}</p>
         <p style="font-size:14px;line-height:1.7;color:#374151">Thank you for the opportunity to work with {company} on <strong>{project}</strong>{f' ({section})' if section else ''}. We appreciate your trust in ReDry to solve the moisture challenges on this roof.</p>
-        <p style="font-size:14px;line-height:1.7;color:#374151">Please find your fixed lease proposal attached and summarized below. You can also review the full details, select your payment option, and accept the proposal online.</p>
+        <p style="font-size:14px;line-height:1.7;color:#374151">Please find your fixed lease proposal attached and summarized below. You can also review the full details and accept the proposal online.</p>
 
         <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
           <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Lease Summary</p>
@@ -414,7 +436,7 @@ def send_proposal(pid):
             {install_line}
             <tr style="border-top:2px solid #1B2A4A"><td style="padding:10px 12px;font-size:15px;font-weight:800;color:#1B2A4A">Total</td><td style="padding:10px 12px;font-size:15px;font-weight:800;color:#1B2A4A;text-align:right">{fc(grand_total)}</td></tr>
           </table>
-          <p style="font-size:13px;color:#374151;margin:12px 0 0 0;line-height:1.6">Standard terms: <strong>50% deposit</strong> ({fc(deposit_50)}) upon contract execution, with the remaining <strong>50% due at installation</strong>.</p>
+          <p style="font-size:13px;color:#374151;margin:12px 0 0 0;line-height:1.6">Payment of <strong>{fc(grand_total)}</strong> is due in full upon contract execution.</p>
         </div>
 
         <div style="margin:24px 0;text-align:center">
@@ -641,7 +663,7 @@ def get_proposal_config(pid):
     else:
         print(f"[get_proposal_config] No file for {pid} and no DATABASE_URL configured")
     if not cfg: return jsonify({"error": "Not found"}), 404
-    db_update_status(pid, "viewed", "viewed_at")
+    db_update_status_if_earlier(pid, "viewed", "viewed_at")
     db_log_event(pid, "viewed", {"ip": request.headers.get("X-Forwarded-For", request.remote_addr), "ua": request.headers.get("User-Agent", "")[:200]})
     return jsonify(cfg)
 
@@ -678,7 +700,7 @@ def accept_proposal(pid):
     accepted_path = os.path.join(PROPOSALS_DIR, f"{pid}_accepted.json")
     if os.path.exists(accepted_path): return jsonify({"error": "already_accepted", "status": "accepted"}), 409
     with open(p) as f: cfg = json.load(f)
-    acc = request.get_json()
+    acc = request.get_json() or {}
     now = datetime.now(timezone.utc)
     sig_proof = {
         "proposalId": pid, "signerName": acc.get("name", ""), "signerDate": acc.get("date", ""),
@@ -757,7 +779,10 @@ def create_checkout_session():
         if not validate_pid(proposal_id): return jsonify({"error": "Invalid proposal ID"}), 400
         p = os.path.join(PROPOSALS_DIR, f"{proposal_id}.json")
         if not os.path.exists(p): return jsonify({"error": "Proposal not found"}), 404
+        with open(p) as f: cfg = json.load(f)
         option = data.get("option", 2)
+        if cfg.get("leaseType") == "fixed" and option != 1:
+            return jsonify({"error": "Fixed Lease requires full payment (option 1)"}), 400
         payment_number = data.get("paymentNumber", 1); description = data.get("description", "ReDry Vent System Lease")
         payment_method = data.get("paymentMethod", "card")
         client_company = data.get("clientCompany", ""); project_name = data.get("projectName", "")
@@ -776,20 +801,12 @@ def create_checkout_session():
         session = stripe.checkout.Session.create(**params)
         return jsonify({"url": session.url, "sessionId": session.id})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Checkout error: {e}")
+        return jsonify({"error": "Could not create checkout session"}), 500
 
 # ─── Payment Confirmation ───
 def _record_payment(pid, cfg, option, payment_number, amount, method, ip_address="", stripe_session_id=""):
     """Shared logic for recording a verified payment. Called from both the API route and webhook."""
-    if stripe_session_id and DATABASE_URL:
-        try:
-            conn = get_db(); cur = conn.cursor()
-            cur.execute("SELECT 1 FROM payments WHERE stripe_session_id = %s", (stripe_session_id,))
-            if cur.fetchone():
-                conn.close()
-                return False
-            conn.close()
-        except Exception as e: print(f"DB error (idempotency check): {e}")
     now = datetime.now(timezone.utc)
     option_label = OPTION_LABELS.get(option, f"Option {option}")
     payment_labels = {1: "Deposit", 2: "Install Payment", 3: "Final Payment"}
@@ -799,9 +816,11 @@ def _record_payment(pid, cfg, option, payment_number, amount, method, ip_address
     pmt_label = payment_labels.get(payment_number, f"Payment {payment_number}")
     project = html_escape(cfg.get("projectName", "Project")); company = html_escape(cfg.get("clientCompany", "Client"))
     client_email = cfg.get("clientEmail", ""); section = html_escape(cfg.get("projectSection", ""))
-    db_store_payment(pid, {"proposalId": pid, "option": option, "optionLabel": option_label, "paymentNumber": payment_number,
+    inserted = db_store_payment(pid, {"proposalId": pid, "option": option, "optionLabel": option_label, "paymentNumber": payment_number,
         "paymentLabel": pmt_label, "amountCents": amount, "method": method, "paidAtUTC": now.isoformat(),
         "ipAddress": ip_address, "stripeSessionId": stripe_session_id})
+    if not inserted:
+        return False
     db_update_status(pid, "paid", "paid_at")
     db_log_event(pid, "payment", {"option": option, "paymentNumber": payment_number, "amountCents": amount, "method": method})
     amt_str = f"${amount/100:,.2f}" if amount else "Amount pending"
@@ -842,6 +861,7 @@ def _record_payment(pid, cfg, option, payment_number, amount, method, ip_address
           <div style="padding:16px;text-align:center;font-size:11px;color:#94a3b8">ReDry, LLC | Advancing the Science of Moisture Removal</div>
         </div>"""
         send_email([client_email], f"Payment Receipt: {project} | {pmt_label}", client_html)
+    return True
 
 @app.route("/api/proposal/<pid>/payment-confirm", methods=["POST"])
 def payment_confirm(pid):
