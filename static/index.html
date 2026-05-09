@@ -185,6 +185,7 @@ const PHD = {
 };
 
 const numWord = n => ["zero","one","two","three","four","five","six","seven","eight","nine","ten"][n] || String(n);
+const escHtml = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 const fmtC = v => new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(v);
 const fmtN = v => new Intl.NumberFormat("en-US").format(v);
 const fmtPct = v => (v*100).toFixed(2).replace(/\.?0+$/,"") + "%";
@@ -991,7 +992,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           <div>Selected: <strong style={{color:C.dark}}>{options[selectedOption]?.label || `Option ${selectedOption+1}`}</strong></div>
         </div>
         {selectedOption!==null && <div style={{marginTop:20}}>
-          <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:12}}>Pay Your Deposit</div>
+          <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:12}}>Complete Payment</div>
           <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:12}}>
             <button onClick={()=>setPayingWith("card")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
             <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>
@@ -1000,7 +1001,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           </div>
           <button onClick={()=>doCheckout(selectedOption, 0)} disabled={checkoutLoading}
             style={{padding:"14px 32px",border:"none",borderRadius:8,background:C.orange,color:"#fff",fontSize:15,fontWeight:700,cursor:checkoutLoading?"wait":"pointer"}}>
-            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? options[selectedOption].payments[0].achAmount : options[selectedOption].payments[0].amount)} Deposit`}
+            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? options[selectedOption].payments[0].achAmount : options[selectedOption].payments[0].amount)} — ${options[selectedOption].payments[0].label}`}
           </button>
         </div>}
       </div>
@@ -1074,7 +1075,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
         <B html="Coring of roof membrane and insulation (by roofing contractor per ReDry spec)."/>
         <B html="Roof membrane repair, replacement, or coating (by others)."/>
         <B html="Structural deck repair or modification."/>
-        <B html={`Any work beyond the ${form.projectSection||"designated"} boundary identified on the Placement Map.`}/>
+        <B html={`Any work beyond the ${escHtml(form.projectSection)||"designated"} boundary identified on the Placement Map.`}/>
         {!form.hidePricing && SH(3,"Pricing and Payment")}
         {form.hidePricing && SH(3,"Project Details")}
         {!form.hidePricing && <P>The vent system lease is based on <strong>{fmtN(wetSF)} square feet</strong> of identified wet insulation at <strong>{fmtC(rate)} per square foot</strong>.</P>}
@@ -1346,7 +1347,7 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
         <B html="Following installation, ReDry will attach the proprietary ReDry Vent heads and confirm proper positioning."/>
         <B html="ReDry will complete photo documentation per specification requirements for warranty activation."/>
         <B html={`Lease term: <strong>${leaseTerm} month${leaseTerm!==1?"s":""}</strong> from date of installation.`}/>
-        <B html="Vents remain the property of ReDry, LLC and will be retrieved at the conclusion of the lease term or once performance criteria are met."/>
+        <B html="Vents remain the property of ReDry, LLC and will be retrieved at the conclusion of the lease term."/>
 
         {SH(3,"Pricing and Payment")}
         <P>The vent rental is based on <strong>{numVents} vent{numVents!==1?"s":""}</strong> at <strong>{fmtC(ventRate)} per vent</strong> for a <strong>{leaseTerm}-month</strong> lease term.</P>
@@ -1366,8 +1367,8 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
           ["4.2 Roofing Contractor Responsibilities","The roofing contractor is solely responsible for installing and bonding the 2-Way Vents per the ReDry Installation Specification."],
           ["4.3 Installation Specification","All work shall be performed per ReDry Vent System Installation Specification SPEC-VENT-2026-01 (Rev. A)."],
           ["4.4 Equipment Ownership","All ReDry Vent heads remain the sole property of ReDry, LLC throughout the lease period."],
-          ["4.5 Lease Term",`The lease term is ${leaseTerm} months from the date of installation. Vents will be retrieved at the conclusion of the lease term or upon meeting performance criteria.`],
-          ["4.6 Access","The client shall provide safe, unobstructed access to the roof area during commissioning and scheduled inspections."],
+          ["4.5 Lease Term",`The lease term is ${leaseTerm} months from the date of installation. Vents will be retrieved at the conclusion of the lease term.`],
+          ["4.6 Access","The client shall provide safe, unobstructed access to the roof area during commissioning."],
           ["4.7 Proposal Validity",`This proposal is valid for ${parseInt(form.validDays)||30} days from date of issue (${vt}).`],
         ].map(([t,x])=><p key={t} style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"10px 0",textAlign:"justify"}}><strong style={{color:C.navy}}>{t}.</strong>&nbsp;&nbsp;{x}</p>)}
       </div>
@@ -1690,7 +1691,7 @@ function App() {
   };
 
   const validateForm=()=>{
-    if(activeForm.showCustomOption){
+    if(leaseType!=="fixed" && activeForm.showCustomOption){
       const t=(activeForm.customOptionPayments||[]).reduce((s,p)=>s+(parseFloat(p.pct)||0),0);
       if(t!==100){alert(`Custom option payment percentages must equal 100% (currently ${t}%).`);return false;}
     }

@@ -1468,14 +1468,6 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
 
     tax_rate_val = parse_tax_rate(config)
 
-    show_option_0 = config.get("showOption0", False)
-    show_option_1 = config.get("showOption1", True)
-    show_option_2 = config.get("showOption2", False)
-    show_custom_option = config.get("showCustomOption", False)
-    custom_option_label = config.get("customOptionLabel", "Custom")
-    custom_option_adj = safe_float(config.get("customOptionAdj", 0) or 0) / 100
-    custom_option_payments = config.get("customOptionPayments", [])
-
     proposal_id = config.get("_proposalId", "")
     proposal_date_str = config.get("proposalDate", datetime.now().strftime("%Y-%m-%d"))
     valid_days = safe_int(config.get("validDays", 30), 30)
@@ -1492,30 +1484,6 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
     tax_amount = round(lease_total * tax_rate_val, 2)
     subtotal = round(lease_total + tax_amount, 2)
     grand_total = round(subtotal + install_fee, 2)
-
-    # Payment option calculations
-    pf_adjusted = round(lease_total * 0.97, 2)
-    pf_tax = round(pf_adjusted * tax_rate_val, 2)
-    pf_total = round(pf_adjusted + pf_tax + install_fee, 2)
-
-    std_total = grand_total
-    std_deposit = round(std_total / 2, 2)
-    std_balance = round(std_total - std_deposit, 2)
-
-    ez_adjusted = round(lease_total * 1.03, 2)
-    ez_tax = round(ez_adjusted * tax_rate_val, 2)
-    ez_total = round(ez_adjusted + ez_tax + install_fee, 2)
-    ez_deposit = round(ez_total * 0.10, 2)
-    ez_install = round(ez_total * 0.40, 2)
-    ez_final = round(ez_total - ez_deposit - ez_install, 2)
-
-    custom_adjusted = round(lease_total * (1 + custom_option_adj), 2)
-    custom_tax = round(custom_adjusted * tax_rate_val, 2)
-    custom_total = round(custom_adjusted + custom_tax + install_fee, 2)
-    custom_pmts = []
-    for cp in custom_option_payments:
-        pct = safe_float(cp.get("pct", 0) or 0) / 100
-        custom_pmts.append((cp.get("label", "Payment"), round(custom_total * pct, 2), cp.get("due", "")))
 
     proposal_date = safe_parse_date(proposal_date_str)
     proposal_date_display = proposal_date.strftime("%B %d, %Y").replace(" 0", " ")
@@ -1602,7 +1570,7 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
     story.append(Spacer(1, 4))
     story.append(Paragraph(f"This proposal covers the fixed-term rental of <b>{num_vents} ReDry 2-Way Vent{'s' if num_vents != 1 else ''}</b> for the {project_section or 'designated area'} of {project_name}, located at {full_address}. The lease term is <b>{lease_term} month{'s' if lease_term != 1 else ''}</b> at a rate of <b>${vent_rate:,.2f} per vent</b>.", style_body))
     story.append(Spacer(1, 4))
-    story.append(Paragraph("The roofing contractor is responsible for installing the 2-Way Vents per the ReDry Installation Specification. Following installation, ReDry will attach its proprietary ReDry Vent heads, confirm proper placement, and conduct periodic inspections.", style_body))
+    story.append(Paragraph("The roofing contractor is responsible for installing the 2-Way Vents per the ReDry Installation Specification. Following installation, ReDry will attach its proprietary ReDry Vent heads and confirm proper placement.", style_body))
     story.append(Spacer(1, 12))
 
     # 2. Scope of Work
@@ -1616,7 +1584,7 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
         "Following installation, ReDry will attach the proprietary ReDry Vent heads and confirm proper positioning.",
         "ReDry will complete photo documentation per specification requirements for warranty activation.",
         f"Lease term: <b>{lease_term} month{'s' if lease_term != 1 else ''}</b> from date of installation.",
-        "Vents remain the property of ReDry, LLC and will be retrieved at the conclusion of the lease term or once performance criteria are met.",
+        "Vents remain the property of ReDry, LLC and will be retrieved at the conclusion of the lease term.",
     ]
     for b in bullets:
         story.append(Paragraph(f"<font color='#E8943A'>•</font>&nbsp;&nbsp;{b}", style_body))
@@ -1624,7 +1592,7 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
     story.append(Spacer(1, 12))
 
     # 3. Pricing
-    story.append(Paragraph("3. Pricing and Payment Options", style_section_head))
+    story.append(Paragraph("3. Pricing and Payment", style_section_head))
     story.append(orange_rule())
     story.append(Spacer(1, 6))
     story.append(Paragraph(f"The vent rental is based on <b>{num_vents} vent{'s' if num_vents != 1 else ''}</b> at <b>${vent_rate:,.2f} per vent</b> for a <b>{lease_term}-month</b> lease term.", style_body))
@@ -1659,25 +1627,8 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
     story.append(pricing_table)
     story.append(Spacer(1, 16))
 
-    # Payment options
-    visible_options = []
-    if show_option_0:
-        visible_options.append(("Pay in Full", f"${pf_total:,.2f}", "3% discount applied", [("Full Payment", f"${pf_total:,.2f}", "Due upon contract execution")]))
-    if show_option_1:
-        visible_options.append(("50% Now. 50% at Install.", f"${std_total:,.2f}", "Standard pricing", [("Deposit (50%)", f"${std_deposit:,.2f}", "Due upon contract execution"), ("Balance (50%)", f"${std_balance:,.2f}", "Due upon vent installation")]))
-    if show_option_2:
-        visible_options.append(("Easy Start", f"${ez_total:,.2f}", "3% convenience fee", [("Deposit (10%)", f"${ez_deposit:,.2f}", "Due upon contract execution"), ("Install (40%)", f"${ez_install:,.2f}", "Due when ready for install"), ("Final (50%)", f"${ez_final:,.2f}", "Due upon vent installation")]))
-    if show_custom_option and custom_pmts:
-        visible_options.append((custom_option_label, f"${custom_total:,.2f}", f"{abs(custom_option_adj)*100:.0f}% {'discount' if custom_option_adj < 0 else 'fee' if custom_option_adj > 0 else 'standard'}", [(l, f"${a:,.2f}", d) for l, a, d in custom_pmts]))
-
-    if visible_options:
-        story.append(Paragraph("<b>Payment Options</b>", style_body))
-        story.append(Spacer(1, 6))
-        for opt_name, opt_total, opt_note, opt_payments in visible_options:
-            story.append(Paragraph(f"<b>{opt_name}</b> — {opt_total} <font color='#666666' size='9'>({opt_note})</font>", style_body))
-            for pmt_label, pmt_amount, pmt_due in opt_payments:
-                story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;{pmt_label}: <b>{pmt_amount}</b> — <i>{pmt_due}</i>", ParagraphStyle('PmtLine', parent=style_body, fontSize=9.5, leading=13)))
-            story.append(Spacer(1, 8))
+    # Payment — Fixed Lease is always pay-in-full
+    story.append(Paragraph(f"<b>Payment:</b> Full payment of <b>${grand_total:,.2f}</b> is due upon contract execution.", style_body))
 
     story.append(Spacer(1, 12))
 
@@ -1690,8 +1641,8 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
         ("4.2 Roofing Contractor Responsibilities", "The roofing contractor is solely responsible for installing and bonding the 2-Way Vents per the ReDry Installation Specification."),
         ("4.3 Installation Specification", "All work shall be performed per ReDry Vent System Installation Specification SPEC-VENT-2026-01 (Rev. A)."),
         ("4.4 Equipment Ownership", "All ReDry Vent heads remain the sole property of ReDry, LLC throughout the lease period."),
-        ("4.5 Lease Term", f"The lease term is {lease_term} months from the date of installation. Vents will be retrieved at the conclusion of the lease term or upon meeting performance criteria."),
-        ("4.6 Access", "The client shall provide safe, unobstructed access to the roof area during commissioning and scheduled inspections."),
+        ("4.5 Lease Term", f"The lease term is {lease_term} months from the date of installation. Vents will be retrieved at the conclusion of the lease term."),
+        ("4.6 Access", "The client shall provide safe, unobstructed access to the roof area during commissioning."),
         ("4.7 Proposal Validity", f"This proposal is valid for {valid_days} days from date of issue ({valid_through})."),
     ]
     for title, text in conditions:
