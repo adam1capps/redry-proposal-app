@@ -1466,6 +1466,13 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
     lease_term = safe_int(config.get("leaseTerm", 12) or 12, 12)
     install_fee = safe_float(config.get("installFee", 0) or 0)
 
+    ship_address = config.get("shipAddress", "")
+    ship_city = config.get("shipCity", "")
+    ship_state = config.get("shipState", "")
+    ship_zip = config.get("shipZip", "")
+    ship_parts = [ship_address, ", ".join(filter(None, [ship_city, ship_state])), ship_zip]
+    full_ship_address = ", ".join(filter(None, ship_parts))
+
     tax_rate_val = parse_tax_rate(config)
 
     proposal_id = config.get("_proposalId", "")
@@ -1579,13 +1586,15 @@ def generate_fixed_proposal_pdf(config, logo_path=None, vent_map_path=None):
     story.append(Spacer(1, 6))
     bullets = [
         f"ReDry will furnish <b>{num_vents}</b> ReDry 2-Way Vent{'s' if num_vents != 1 else ''} and ReDry Vent heads.",
-        "ReDry will provide the Installation Specification (SPEC-VENT-2026-01, Rev. A) and Placement Map to the roofing contractor.",
+        f"ReDry will provide the Installation Specification (SPEC-VENT-2026-01, Rev. A){' and Placement Map' if vent_map_path else ''} to the roofing contractor.",
         "The <b>roofing contractor</b> is solely responsible for installing and bonding the 2-Way Vents to the roof membrane per the Installation Specification.",
         "Following installation, ReDry will attach the proprietary ReDry Vent heads and confirm proper positioning.",
         "ReDry will complete photo documentation per specification requirements for warranty activation.",
         f"Lease term: <b>{lease_term} month{'s' if lease_term != 1 else ''}</b> from date of installation.",
         "Vents remain the property of ReDry, LLC and will be retrieved at the conclusion of the lease term.",
     ]
+    if full_ship_address:
+        bullets.append(f"Vents will be shipped to: <b>{full_ship_address}</b>")
     for b in bullets:
         story.append(Paragraph(f"<font color='#E8943A'>•</font>&nbsp;&nbsp;{b}", style_body))
         story.append(Spacer(1, 3))

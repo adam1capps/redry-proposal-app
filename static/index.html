@@ -248,11 +248,9 @@ const defaultFixedForm = {
   clientCompany:"", clientContact:"", clientTitle:"", clientPhone:"", clientEmail:"",
   projectName:"", projectAddress:"", projectCity:"", projectState:"", projectZip:"",
   projectSection:"", numVents:"", ventRate:"1000", leaseTerm:"12", installFee:"0",
+  shipAddress:"", shipCity:"", shipState:"", shipZip:"",
   proposalDate: new Date().toISOString().split("T")[0], validDays:"30",
-  taxRate:"",
-  showOption0: false, showOption1: true, showOption2: false,
-  showCustomOption: false, customOptionLabel:"", customOptionAdj:"0",
-  customOptionPayments: [{ pct:"100", label:"Full Payment", due:"Due upon contract execution" }]
+  taxRate:""
 };
 const LS_FIXED_FORM = "redry_fixed_form";
 const LS_FIXED_PRESETS = "redry_fixed_presets";
@@ -765,6 +763,17 @@ function FixedLeaseBuilder({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink
       </div>
       <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
         <Inp label="Section / Area" value={form.projectSection} onChange={s("projectSection")} placeholder="North Section" half/>
+      </div>
+
+      <SecLabel>Shipping Address</SecLabel>
+      <p style={{fontSize:12,color:C.gray,margin:"0 0 8px",lineHeight:1.5}}>Where should we ship the vents? Leave blank if same as project address.</p>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+        <Inp label="Street Address" value={form.shipAddress} onChange={s("shipAddress")} placeholder="123 Warehouse Blvd"/>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
+        <Inp label="City" value={form.shipCity} onChange={s("shipCity")} placeholder="Austin" third/>
+        <Inp label="State" value={form.shipState} onChange={s("shipState")} placeholder="TX" third/>
+        <Inp label="ZIP" value={form.shipZip} onChange={s("shipZip")} placeholder="78745" third/>
       </div>
 
       <SecLabel>Pricing</SecLabel>
@@ -1342,12 +1351,13 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
 
         {SH(2,"Scope of Work")}
         <B html={`ReDry will furnish <strong>${numVents}</strong> ReDry 2-Way Vent${numVents!==1?"s":""} and ReDry Vent heads.`}/>
-        <B html="ReDry will provide the Installation Specification (SPEC-VENT-2026-01, Rev. A) and Placement Map to the roofing contractor."/>
+        <B html={`ReDry will provide the Installation Specification (SPEC-VENT-2026-01, Rev. A)${ventMapUrl ? " and Placement Map" : ""} to the roofing contractor.`}/>
         <B html="The <strong>roofing contractor</strong> is solely responsible for installing and bonding the 2-Way Vents to the roof membrane per the Installation Specification."/>
         <B html="Following installation, ReDry will attach the proprietary ReDry Vent heads and confirm proper positioning."/>
         <B html="ReDry will complete photo documentation per specification requirements for warranty activation."/>
         <B html={`Lease term: <strong>${leaseTerm} month${leaseTerm!==1?"s":""}</strong> from date of installation.`}/>
         <B html="Vents remain the property of ReDry, LLC and will be retrieved at the conclusion of the lease term."/>
+        {(()=>{ const sa=[form.shipAddress,form.shipCity,form.shipState,form.shipZip].filter(Boolean).join(", "); return sa ? <B html={`Vents will be shipped to: <strong>${escHtml(sa)}</strong>`}/> : null; })()}
 
         {SH(3,"Pricing and Payment")}
         <P>The vent rental is based on <strong>{numVents} vent{numVents!==1?"s":""}</strong> at <strong>{fmtC(ventRate)} per vent</strong> for a <strong>{leaseTerm}-month</strong> lease term.</P>
