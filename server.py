@@ -87,6 +87,10 @@ def auth_logout():
     session.pop("auth_token", None)
     return jsonify({"ok": True})
 
+@app.route("/health")
+def health_check():
+    return jsonify({"status": "ok"})
+
 # ─── Database ───
 def get_db():
     conn = psycopg2.connect(DATABASE_URL)
