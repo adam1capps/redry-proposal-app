@@ -97,38 +97,63 @@ def get_db():
     conn.autocommit = True
     return conn
 
+_INIT_DB_OK = False
+_INIT_DB_LAST_ERROR = None
+
+def _exec_ignore_dup(cur, sql):
+    """Run a DDL statement, swallowing duplicate-object errors from races
+    between concurrent gunicorn workers. CREATE...IF NOT EXISTS is not
+    fully atomic in Postgres' system catalog, so two workers running the
+    same DDL at the same time can collide on pg_class_relname_nsp_index."""
+    try:
+        cur.execute(sql)
+    except (psycopg2.errors.DuplicateTable,
+            psycopg2.errors.DuplicateObject,
+            psycopg2.errors.UniqueViolation) as e:
+        print(f"init_db: ignoring expected race on concurrent DDL: {e}")
+
 def init_db():
+    global _INIT_DB_OK, _INIT_DB_LAST_ERROR
     if not DATABASE_URL:
         print("WARNING: No DATABASE_URL. Database features disabled.")
         return
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("""CREATE TABLE IF NOT EXISTS proposals (
-            id TEXT PRIMARY KEY, config JSONB NOT NULL, status TEXT DEFAULT 'draft',
-            created_at TIMESTAMPTZ DEFAULT NOW(), sent_at TIMESTAMPTZ,
-            viewed_at TIMESTAMPTZ, signed_at TIMESTAMPTZ, paid_at TIMESTAMPTZ)""")
-        # Vent map binary lives with the proposal so it survives ephemeral
-        # filesystem wipes on Render/Railway free tiers.
-        cur.execute("ALTER TABLE proposals ADD COLUMN IF NOT EXISTS vent_map_bytes BYTEA")
-        cur.execute("ALTER TABLE proposals ADD COLUMN IF NOT EXISTS vent_map_filename TEXT")
-        cur.execute("""CREATE TABLE IF NOT EXISTS signatures (
-            id SERIAL PRIMARY KEY, proposal_id TEXT REFERENCES proposals(id),
-            signer_name TEXT, signer_date TEXT, selected_option INT,
-            ip_address TEXT, user_agent TEXT, signed_at TIMESTAMPTZ DEFAULT NOW(), proof JSONB)""")
-        cur.execute("""CREATE TABLE IF NOT EXISTS payments (
-            id SERIAL PRIMARY KEY, proposal_id TEXT REFERENCES proposals(id),
-            option_num INT, payment_number INT, amount_cents INT,
-            method TEXT, stripe_session_id TEXT, paid_at TIMESTAMPTZ DEFAULT NOW(), details JSONB)""")
-        cur.execute("""CREATE TABLE IF NOT EXISTS proposal_events (
-            id SERIAL PRIMARY KEY, proposal_id TEXT REFERENCES proposals(id),
-            event_type TEXT, details JSONB, created_at TIMESTAMPTZ DEFAULT NOW())""")
-        cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS payments_stripe_session_unique
-            ON payments(stripe_session_id) WHERE stripe_session_id IS NOT NULL AND stripe_session_id != ''""")
-        conn.close()
-        print("PostgreSQL: Tables ready.")
-    except Exception as e:
-        print(f"PostgreSQL init error: {e}")
+    import time
+    delays = [0, 2, 4, 8, 16]
+    for attempt, delay in enumerate(delays):
+        if delay: time.sleep(delay)
+        try:
+            conn = get_db()
+            cur = conn.cursor()
+            _exec_ignore_dup(cur, """CREATE TABLE IF NOT EXISTS proposals (
+                id TEXT PRIMARY KEY, config JSONB NOT NULL, status TEXT DEFAULT 'draft',
+                created_at TIMESTAMPTZ DEFAULT NOW(), sent_at TIMESTAMPTZ,
+                viewed_at TIMESTAMPTZ, signed_at TIMESTAMPTZ, paid_at TIMESTAMPTZ)""")
+            # Vent map binary lives with the proposal so it survives ephemeral
+            # filesystem wipes on Render/Railway free tiers.
+            _exec_ignore_dup(cur, "ALTER TABLE proposals ADD COLUMN IF NOT EXISTS vent_map_bytes BYTEA")
+            _exec_ignore_dup(cur, "ALTER TABLE proposals ADD COLUMN IF NOT EXISTS vent_map_filename TEXT")
+            _exec_ignore_dup(cur, """CREATE TABLE IF NOT EXISTS signatures (
+                id SERIAL PRIMARY KEY, proposal_id TEXT REFERENCES proposals(id),
+                signer_name TEXT, signer_date TEXT, selected_option INT,
+                ip_address TEXT, user_agent TEXT, signed_at TIMESTAMPTZ DEFAULT NOW(), proof JSONB)""")
+            _exec_ignore_dup(cur, """CREATE TABLE IF NOT EXISTS payments (
+                id SERIAL PRIMARY KEY, proposal_id TEXT REFERENCES proposals(id),
+                option_num INT, payment_number INT, amount_cents INT,
+                method TEXT, stripe_session_id TEXT, paid_at TIMESTAMPTZ DEFAULT NOW(), details JSONB)""")
+            _exec_ignore_dup(cur, """CREATE TABLE IF NOT EXISTS proposal_events (
+                id SERIAL PRIMARY KEY, proposal_id TEXT REFERENCES proposals(id),
+                event_type TEXT, details JSONB, created_at TIMESTAMPTZ DEFAULT NOW())""")
+            _exec_ignore_dup(cur, """CREATE UNIQUE INDEX IF NOT EXISTS payments_stripe_session_unique
+                ON payments(stripe_session_id) WHERE stripe_session_id IS NOT NULL AND stripe_session_id != ''""")
+            conn.close()
+            _INIT_DB_OK = True
+            _INIT_DB_LAST_ERROR = None
+            print("PostgreSQL: Tables ready.")
+            return
+        except Exception as e:
+            _INIT_DB_LAST_ERROR = str(e)
+            print(f"PostgreSQL init attempt {attempt + 1}/{len(delays)} failed: {e}")
+    print(f"PostgreSQL init: gave up after {len(delays)} attempts. Last error: {_INIT_DB_LAST_ERROR}")
 
 init_db()
 
@@ -141,6 +166,10 @@ def db_store_proposal(pid, config, status="draft", vent_map_bytes=None, vent_map
     if not DATABASE_URL: return
     conn = get_db(); cur = conn.cursor()
     try:
+        # Self-heal: ensure the vent_map_* columns exist even if init_db lost
+        # a startup race or never completed. Idempotent and cheap.
+        _exec_ignore_dup(cur, "ALTER TABLE proposals ADD COLUMN IF NOT EXISTS vent_map_bytes BYTEA")
+        _exec_ignore_dup(cur, "ALTER TABLE proposals ADD COLUMN IF NOT EXISTS vent_map_filename TEXT")
         if vent_map_bytes is not None:
             cur.execute("""INSERT INTO proposals (id, config, status, vent_map_bytes, vent_map_filename)
                            VALUES (%s, %s, %s, %s, %s)
@@ -281,37 +310,41 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PROPOSALS_DIR, exist_ok=True)
 
 def load_proposal_config(pid):
-    """Load config from local file or DB. Render's filesystem is ephemeral,
-    so the DB is the authoritative store after restarts."""
+    """Load config from Postgres (authoritative) with a local-file fallback
+    only when the DB is unreachable. Render's filesystem is ephemeral, so
+    stale fixtures on disk must never override durable DB rows."""
+    if DATABASE_URL:
+        try:
+            conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT config FROM proposals WHERE id=%s", (pid,))
+            row = cur.fetchone(); conn.close()
+            if row:
+                cfg = row["config"]
+                if isinstance(cfg, str): cfg = json.loads(cfg)
+                print(f"[load_proposal_config] Loaded {pid} from DB")
+                return cfg
+        except Exception as e:
+            print(f"DB error (load_proposal_config): {e}; falling back to local file")
     p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
     if os.path.exists(p):
+        print(f"[load_proposal_config] Loaded {pid} from file (DB miss or unreachable)")
         with open(p) as f: return json.load(f)
-    if not DATABASE_URL: return None
-    try:
-        conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT config FROM proposals WHERE id=%s", (pid,))
-        row = cur.fetchone(); conn.close()
-        if not row: return None
-        cfg = row["config"]
-        if isinstance(cfg, str): cfg = json.loads(cfg)
-        return cfg
-    except Exception as e:
-        print(f"DB error (load_proposal_config): {e}")
-        return None
+    return None
 
 def is_proposal_accepted(pid):
-    """Check if proposal already accepted (file marker or DB signature)."""
-    if os.path.exists(os.path.join(PROPOSALS_DIR, f"{pid}_accepted.json")):
-        return True
-    if not DATABASE_URL: return False
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("SELECT 1 FROM signatures WHERE proposal_id=%s LIMIT 1", (pid,))
-        row = cur.fetchone(); conn.close()
-        return row is not None
-    except Exception as e:
-        print(f"DB error (is_proposal_accepted): {e}")
-        return False
+    """Check if proposal already accepted. DB signature is authoritative;
+    the local _accepted.json marker is only a fallback when the DB is
+    unreachable, since ephemeral filesystem markers can disappear on redeploy
+    while DB rows persist."""
+    if DATABASE_URL:
+        try:
+            conn = get_db(); cur = conn.cursor()
+            cur.execute("SELECT 1 FROM signatures WHERE proposal_id=%s LIMIT 1", (pid,))
+            row = cur.fetchone(); conn.close()
+            return row is not None
+        except Exception as e:
+            print(f"DB error (is_proposal_accepted): {e}; falling back to local marker")
+    return os.path.exists(os.path.join(PROPOSALS_DIR, f"{pid}_accepted.json"))
 
 def get_or_regenerate_pdf(pid, client_facing=False):
     """Return PDF bytes for the proposal. Uses cached file if available,
@@ -1131,6 +1164,172 @@ def dashboard_data():
     except Exception as e:
         print(f"DB error (dashboard): {e}")
     return jsonify({"stats": stats, "proposals": proposals, "signatures": signatures, "payments": payments})
+
+# ─── Admin diagnostics ───
+def _is_session_authed():
+    """True when the current request carries a Flask session that came from
+    a successful /api/auth/login. Used for the /admin page so direct browser
+    navigation works without an X-Auth-Token header."""
+    if not TEAM_PASSWORD:
+        return True
+    if session.get("auth_token"):
+        return True
+    token = request.headers.get("X-Auth-Token") or ""
+    stored = session.get("auth_token", "")
+    return bool(token and stored and hmac.compare_digest(token, stored))
+
+@app.route("/api/admin/diagnostics")
+def admin_diagnostics():
+    """Read-only snapshot of what's actually in Postgres + which local files
+    shadow DB rows. Strictly SELECT only; no writes anywhere on this path."""
+    if not _is_session_authed():
+        return jsonify({"error": "Unauthorized"}), 401
+    out = {
+        "databaseConfigured": bool(DATABASE_URL),
+        "databaseReachable": False,
+        "schemaOk": False,
+        "initDbOk": _INIT_DB_OK,
+        "initDbLastError": _INIT_DB_LAST_ERROR,
+        "totalProposals": 0,
+        "rowsWithErrorKey": [],
+        "localFiles": [],
+        "shadowedIds": [],
+        "recent": [],
+    }
+    try:
+        out["localFiles"] = sorted([f[:-5] for f in os.listdir(PROPOSALS_DIR)
+                                    if f.endswith(".json") and "_accepted" not in f])
+    except Exception as e:
+        print(f"diagnostics: listing local files failed: {e}")
+    if not DATABASE_URL:
+        return jsonify(out)
+    try:
+        conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='proposals'")
+        cols = {r["column_name"] for r in cur.fetchall()}
+        out["databaseReachable"] = True
+        out["schemaOk"] = {"id", "config", "status", "vent_map_bytes", "vent_map_filename"} <= cols
+        cur.execute("SELECT COUNT(*) AS n FROM proposals")
+        out["totalProposals"] = cur.fetchone()["n"]
+        cur.execute("SELECT id FROM proposals WHERE config ? 'error' ORDER BY created_at DESC")
+        out["rowsWithErrorKey"] = [r["id"] for r in cur.fetchall()]
+        cur.execute("""SELECT id, config->>'projectName' AS project_name,
+                              config->>'clientCompany' AS client_company,
+                              config->>'clientContact' AS client_contact,
+                              status, created_at
+                       FROM proposals ORDER BY created_at DESC LIMIT 50""")
+        out["recent"] = [{
+            "id": r["id"],
+            "projectName": r["project_name"] or "",
+            "clientCompany": r["client_company"] or "",
+            "clientContact": r["client_contact"] or "",
+            "status": r["status"] or "",
+            "createdAt": r["created_at"].isoformat() if r["created_at"] else None,
+        } for r in cur.fetchall()]
+        # Shadow detection: for each local .json file, fetch the DB row's
+        # config and compare projectName / clientCompany. Mismatch = shadow.
+        shadows = []
+        for fname in out["localFiles"]:
+            if not validate_pid(fname): continue
+            try:
+                with open(os.path.join(PROPOSALS_DIR, f"{fname}.json")) as f:
+                    file_cfg = json.load(f)
+            except Exception:
+                continue
+            cur.execute("SELECT config FROM proposals WHERE id=%s", (fname,))
+            row = cur.fetchone()
+            if not row:
+                shadows.append({"id": fname,
+                                "fileProject": file_cfg.get("projectName", ""),
+                                "fileCompany": file_cfg.get("clientCompany", ""),
+                                "dbProject": None, "dbCompany": None,
+                                "note": "file exists, no matching DB row"})
+                continue
+            db_cfg = row["config"]
+            if isinstance(db_cfg, str): db_cfg = json.loads(db_cfg)
+            if ((file_cfg.get("projectName") or "") != (db_cfg.get("projectName") or "")
+                or (file_cfg.get("clientCompany") or "") != (db_cfg.get("clientCompany") or "")):
+                shadows.append({"id": fname,
+                                "fileProject": file_cfg.get("projectName", ""),
+                                "fileCompany": file_cfg.get("clientCompany", ""),
+                                "dbProject": db_cfg.get("projectName", ""),
+                                "dbCompany": db_cfg.get("clientCompany", ""),
+                                "note": "file and DB content differ"})
+        out["shadowedIds"] = shadows
+        conn.close()
+    except Exception as e:
+        out["initDbLastError"] = out["initDbLastError"] or str(e)
+        print(f"DB error (admin_diagnostics): {e}")
+    return jsonify(out)
+
+
+_ADMIN_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>ReDry Admin Diagnostics</title>
+<style>
+ body{font:14px -apple-system,BlinkMacSystemFont,sans-serif;max-width:1100px;margin:24px auto;padding:0 16px;color:#222}
+ h1{margin:0 0 16px;font-size:22px}
+ h2{font-size:16px;margin:24px 0 8px;border-bottom:1px solid #ddd;padding-bottom:4px}
+ .row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+ .card{border:1px solid #ddd;border-radius:6px;padding:12px 16px;min-width:160px}
+ .card .label{color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+ .card .v{font-size:20px;font-weight:600;margin-top:4px}
+ .ok{color:#15803d} .bad{color:#b91c1c}
+ table{width:100%;border-collapse:collapse;font-size:13px}
+ th,td{padding:6px 8px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}
+ th{background:#f6f6f6}
+ code{font:12px ui-monospace,monospace;background:#f3f3f3;padding:1px 5px;border-radius:3px}
+ .empty{color:#888;font-style:italic}
+ button{padding:6px 12px;border:1px solid #999;border-radius:4px;background:#fff;cursor:pointer}
+ #err{background:#fee2e2;color:#7f1d1d;padding:8px 12px;border-radius:4px;display:none;margin:12px 0}
+</style></head>
+<body>
+<h1>ReDry Admin Diagnostics</h1>
+<div><button onclick="load()">Refresh</button></div>
+<div id="err"></div>
+<div id="content"></div>
+<script>
+function pill(ok){return '<span class="'+(ok?'ok':'bad')+'">'+(ok?'YES':'NO')+'</span>'}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))}
+async function load(){
+ document.getElementById('err').style.display='none'
+ const r=await fetch('/api/admin/diagnostics',{credentials:'include'})
+ if(r.status===401){document.getElementById('err').innerHTML='Not logged in. <a href="/">Open the builder</a>, log in, then come back to <a href="/admin">/admin</a>.';document.getElementById('err').style.display='block';return}
+ const d=await r.json()
+ const cards=[
+  ['DATABASE_URL set',pill(d.databaseConfigured)],
+  ['DB reachable',pill(d.databaseReachable)],
+  ['Schema OK',pill(d.schemaOk)],
+  ['init_db OK',pill(d.initDbOk)],
+  ['Total proposals',esc(d.totalProposals)],
+ ]
+ let html='<div class="row">'+cards.map(c=>'<div class="card"><div class="label">'+c[0]+'</div><div class="v">'+c[1]+'</div></div>').join('')+'</div>'
+ if(d.initDbLastError){html+='<div id="err" style="display:block">init_db last error: <code>'+esc(d.initDbLastError)+'</code></div>'}
+ html+='<h2>Rows with <code>error</code> key in config ('+d.rowsWithErrorKey.length+')</h2>'
+ html+=d.rowsWithErrorKey.length?'<ul>'+d.rowsWithErrorKey.map(id=>'<li><code>'+esc(id)+'</code></li>').join('')+'</ul>':'<div class="empty">None.</div>'
+ html+='<h2>Shadowed IDs &mdash; local file disagrees with DB ('+d.shadowedIds.length+')</h2>'
+ if(d.shadowedIds.length){
+  html+='<table><tr><th>ID</th><th>File: project / company</th><th>DB: project / company</th><th>Note</th></tr>'
+  d.shadowedIds.forEach(s=>{html+='<tr><td><code>'+esc(s.id)+'</code></td><td>'+esc(s.fileProject)+' / '+esc(s.fileCompany)+'</td><td>'+esc(s.dbProject)+' / '+esc(s.dbCompany)+'</td><td>'+esc(s.note)+'</td></tr>'})
+  html+='</table>'
+ } else { html+='<div class="empty">None.</div>' }
+ html+='<h2>Local JSON files on this container ('+d.localFiles.length+')</h2>'
+ html+=d.localFiles.length?'<ul>'+d.localFiles.map(id=>'<li><code>'+esc(id)+'</code></li>').join('')+'</ul>':'<div class="empty">None.</div>'
+ html+='<h2>Recent proposals from DB ('+d.recent.length+')</h2>'
+ if(d.recent.length){
+  html+='<table><tr><th>ID</th><th>Project</th><th>Client company</th><th>Contact</th><th>Status</th><th>Created</th></tr>'
+  d.recent.forEach(p=>{html+='<tr><td><a href="/proposal/'+esc(p.id)+'" target="_blank"><code>'+esc(p.id)+'</code></a></td><td>'+esc(p.projectName)+'</td><td>'+esc(p.clientCompany)+'</td><td>'+esc(p.clientContact)+'</td><td>'+esc(p.status)+'</td><td>'+esc(p.createdAt)+'</td></tr>'})
+  html+='</table>'
+ } else { html+='<div class="empty">None.</div>' }
+ document.getElementById('content').innerHTML=html
+}
+load()
+</script>
+</body></html>"""
+
+@app.route("/admin")
+def admin_page():
+    return _ADMIN_HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
+
 
 # ─── Catch-all for React SPA ───
 @app.route("/", defaults={"path": ""})
