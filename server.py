@@ -170,15 +170,20 @@ def db_store_proposal(pid, config, status="draft", vent_map_bytes=None, vent_map
         # a startup race or never completed. Idempotent and cheap.
         _exec_ignore_dup(cur, "ALTER TABLE proposals ADD COLUMN IF NOT EXISTS vent_map_bytes BYTEA")
         _exec_ignore_dup(cur, "ALTER TABLE proposals ADD COLUMN IF NOT EXISTS vent_map_filename TEXT")
+        # ON CONFLICT preserves the existing row's `status` and
+        # `created_at`. The lifecycle (draft -> sent -> viewed -> signed ->
+        # paid) is owned by db_update_status; refreshing a proposal's share
+        # link via generate_proposal_link must not bounce status back to
+        # 'draft' on an already-sent proposal.
         if vent_map_bytes is not None:
             cur.execute("""INSERT INTO proposals (id, config, status, vent_map_bytes, vent_map_filename)
                            VALUES (%s, %s, %s, %s, %s)
-                           ON CONFLICT (id) DO UPDATE SET config=EXCLUDED.config, status=EXCLUDED.status,
+                           ON CONFLICT (id) DO UPDATE SET config=EXCLUDED.config,
                                vent_map_bytes=EXCLUDED.vent_map_bytes, vent_map_filename=EXCLUDED.vent_map_filename""",
                         (pid, json.dumps(config), status, psycopg2.Binary(vent_map_bytes), vent_map_filename))
         else:
             cur.execute("""INSERT INTO proposals (id, config, status) VALUES (%s, %s, %s)
-                           ON CONFLICT (id) DO UPDATE SET config=EXCLUDED.config, status=EXCLUDED.status""",
+                           ON CONFLICT (id) DO UPDATE SET config=EXCLUDED.config""",
                         (pid, json.dumps(config), status))
     finally:
         conn.close()
@@ -499,7 +504,30 @@ def generate_proposal_link():
             config = request.get_json() or {}
             vent_map = None
         _sanitize_incoming_config(config)
-        proposal_id = uuid.uuid4().hex[:12]
+        # If the client sent a _proposalId AND that row already exists in
+        # Postgres, treat this as an update of the existing proposal rather
+        # than minting a new UUID. Prevents the duplication-on-every-Get-Link
+        # behavior when a user loads an existing proposal from Past Proposals,
+        # tweaks something, and re-generates the share link. _proposalId is
+        # always server-managed metadata, so pop it off the incoming config
+        # either way; we put it back in below at the canonical spot.
+        requested_pid = config.pop("_proposalId", None)
+        proposal_id = None
+        existing_created_at = None
+        if requested_pid and validate_pid(requested_pid) and DATABASE_URL:
+            try:
+                conn = get_db(); cur = conn.cursor()
+                cur.execute("SELECT config->>'_createdAt' FROM proposals WHERE id=%s", (requested_pid,))
+                row = cur.fetchone()
+                if row is not None:
+                    proposal_id = requested_pid
+                    existing_created_at = row[0]
+                conn.close()
+            except Exception as e:
+                print(f"generate_proposal_link: lookup of requested_pid {requested_pid} failed, falling back to new: {e}")
+        is_update = bool(proposal_id)
+        if not proposal_id:
+            proposal_id = uuid.uuid4().hex[:12]
         vent_map_filename = None
         vent_map_bytes = None
         if vent_map:
@@ -518,7 +546,11 @@ def generate_proposal_link():
             pdf_bytes = generate_proposal_pdf(config, logo_path=_logo, vent_map_path=_vmap)
         with open(os.path.join(PROPOSALS_DIR, f"{proposal_id}.pdf"), "wb") as f: f.write(pdf_bytes)
         config["_ventMapFilename"] = vent_map_filename
-        config["_createdAt"] = datetime.now(timezone.utc).isoformat()
+        # Preserve the original creation timestamp when updating; only stamp
+        # one for genuinely new proposals. The SPA strips _createdAt from
+        # cfg on load, so the existing value has to come from the DB
+        # lookup above.
+        config["_createdAt"] = existing_created_at or datetime.now(timezone.utc).isoformat()
         config["_proposalId"] = proposal_id
         with open(os.path.join(PROPOSALS_DIR, f"{proposal_id}.json"), "w") as f: json.dump(config, f)
         # Render/Railway free tiers wipe the filesystem on every redeploy, so the
