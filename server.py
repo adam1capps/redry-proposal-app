@@ -439,6 +439,19 @@ def get_google_maps_key():
     return jsonify({"key": GOOGLE_MAPS_KEY})
 
 # ─── PDF Generation ───
+def _sanitize_incoming_config(config):
+    """Strip junk keys the SPA can accidentally leak into form state.
+
+    The unguarded merge in the Past Proposals loader used to pull
+    {"error":"Not found"} into form state when the proposal didn't exist,
+    saveForm() then persisted it to localStorage, and every subsequent
+    /api/generate-proposal-link POST carried the error key into the DB.
+    The client is now patched, but strip server-side as a defense in depth.
+    `error` is never a legitimate config key."""
+    if isinstance(config, dict):
+        config.pop("error", None)
+    return config
+
 @app.route("/api/generate-pdf", methods=["POST"])
 @require_auth
 def generate_pdf():
@@ -449,6 +462,7 @@ def generate_pdf():
         else:
             config = request.get_json() or {}
             vent_map = None
+        _sanitize_incoming_config(config)
         vent_map_path = None
         if vent_map:
             filename = secure_filename(vent_map.filename)
@@ -484,6 +498,7 @@ def generate_proposal_link():
         else:
             config = request.get_json() or {}
             vent_map = None
+        _sanitize_incoming_config(config)
         proposal_id = uuid.uuid4().hex[:12]
         vent_map_filename = None
         vent_map_bytes = None
