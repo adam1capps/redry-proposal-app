@@ -1767,6 +1767,10 @@ function App() {
         setForm(f=>({...f,...cfg}));
       }
       setProposalId(pid);
+      // Refresh the share-link panel so Copy/Send target the proposal we
+      // just loaded — otherwise it keeps showing whatever link was created
+      // most recently (which would point at a different proposal entirely).
+      setResult({type:"link", proposalId:pid, clientUrl:`/proposal/${pid}`, pdfUrl:`/api/proposal/${pid}/pdf`});
       if(ventFile) setVentMapUrl(`${API}/api/proposal/${pid}/ventmap`);
       else { setVentMapUrl(null); setVentMapFile(null); }
       setView("form");
