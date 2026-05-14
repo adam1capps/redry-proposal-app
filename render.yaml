@@ -3,7 +3,7 @@ services:
     name: redry-proposal-builder
     runtime: docker
     plan: free
-    healthCheckPath: /api/proposals
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: 8080
