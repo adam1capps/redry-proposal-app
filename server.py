@@ -108,6 +108,10 @@ def init_db():
             id TEXT PRIMARY KEY, config JSONB NOT NULL, status TEXT DEFAULT 'draft',
             created_at TIMESTAMPTZ DEFAULT NOW(), sent_at TIMESTAMPTZ,
             viewed_at TIMESTAMPTZ, signed_at TIMESTAMPTZ, paid_at TIMESTAMPTZ)""")
+        # Vent map binary lives with the proposal so it survives ephemeral
+        # filesystem wipes on Render/Railway free tiers.
+        cur.execute("ALTER TABLE proposals ADD COLUMN IF NOT EXISTS vent_map_bytes BYTEA")
+        cur.execute("ALTER TABLE proposals ADD COLUMN IF NOT EXISTS vent_map_filename TEXT")
         cur.execute("""CREATE TABLE IF NOT EXISTS signatures (
             id SERIAL PRIMARY KEY, proposal_id TEXT REFERENCES proposals(id),
             signer_name TEXT, signer_date TEXT, selected_option INT,
@@ -128,14 +132,40 @@ def init_db():
 
 init_db()
 
-def db_store_proposal(pid, config, status="draft"):
+def db_store_proposal(pid, config, status="draft", vent_map_bytes=None, vent_map_filename=None):
+    """Persist the proposal config (and optional vent map binary) to Postgres.
+
+    Raises on failure so callers can surface the error rather than silently
+    handing the user a link that only exists on ephemeral storage.
+    """
     if not DATABASE_URL: return
+    conn = get_db(); cur = conn.cursor()
+    try:
+        if vent_map_bytes is not None:
+            cur.execute("""INSERT INTO proposals (id, config, status, vent_map_bytes, vent_map_filename)
+                           VALUES (%s, %s, %s, %s, %s)
+                           ON CONFLICT (id) DO UPDATE SET config=EXCLUDED.config, status=EXCLUDED.status,
+                               vent_map_bytes=EXCLUDED.vent_map_bytes, vent_map_filename=EXCLUDED.vent_map_filename""",
+                        (pid, json.dumps(config), status, psycopg2.Binary(vent_map_bytes), vent_map_filename))
+        else:
+            cur.execute("""INSERT INTO proposals (id, config, status) VALUES (%s, %s, %s)
+                           ON CONFLICT (id) DO UPDATE SET config=EXCLUDED.config, status=EXCLUDED.status""",
+                        (pid, json.dumps(config), status))
+    finally:
+        conn.close()
+
+def db_load_vent_map(pid):
+    """Return (bytes, filename) for the proposal's vent map, or (None, None)."""
+    if not DATABASE_URL: return (None, None)
     try:
         conn = get_db(); cur = conn.cursor()
-        cur.execute("INSERT INTO proposals (id, config, status) VALUES (%s, %s, %s) ON CONFLICT (id) DO UPDATE SET config=%s, status=%s",
-                    (pid, json.dumps(config), status, json.dumps(config), status))
-        conn.close()
-    except Exception as e: print(f"DB error (store_proposal): {e}")
+        cur.execute("SELECT vent_map_bytes, vent_map_filename FROM proposals WHERE id=%s", (pid,))
+        row = cur.fetchone(); conn.close()
+        if not row or row[0] is None: return (None, None)
+        return (bytes(row[0]), row[1])
+    except Exception as e:
+        print(f"DB error (load_vent_map): {e}")
+        return (None, None)
 
 def db_update_status(pid, status, ts_field=None):
     if not DATABASE_URL: return
@@ -294,11 +324,7 @@ def get_or_regenerate_pdf(pid, client_facing=False):
     if not cfg: return None
     lease_type = cfg.get("leaseType", "performance")
     logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
-    vmap = None
-    vmf = cfg.get("_ventMapFilename")
-    if vmf:
-        vmp = os.path.join(PROPOSALS_DIR, vmf)
-        if os.path.exists(vmp): vmap = vmp
+    vmap = _ensure_vent_map_file(pid, cfg)
     try:
         if client_facing:
             pdf_bytes = (generate_fixed_client_pdf(cfg, logo_path=logo, vent_map_path=vmap)
@@ -314,6 +340,27 @@ def get_or_regenerate_pdf(pid, client_facing=False):
         return pdf_bytes
     except Exception as e:
         print(f"PDF regeneration error for {pid}: {e}")
+        return None
+
+def _ensure_vent_map_file(pid, cfg):
+    """Return a local path to the vent map image, restoring it from the DB
+    if the ephemeral file was wiped. Returns None when no vent map exists."""
+    vmf = cfg.get("_ventMapFilename")
+    if not vmf:
+        return None
+    vmp = os.path.join(PROPOSALS_DIR, vmf)
+    if os.path.exists(vmp):
+        return vmp
+    data, db_name = db_load_vent_map(pid)
+    if not data:
+        return None
+    target_name = db_name or vmf
+    target = os.path.join(PROPOSALS_DIR, target_name)
+    try:
+        with open(target, "wb") as f: f.write(data)
+        return target
+    except Exception as e:
+        print(f"Vent map restore error for {pid}: {e}")
         return None
 
 STATE_TAX_RATES = {
@@ -406,10 +453,13 @@ def generate_proposal_link():
             vent_map = None
         proposal_id = uuid.uuid4().hex[:12]
         vent_map_filename = None
+        vent_map_bytes = None
         if vent_map:
             ext = os.path.splitext(secure_filename(vent_map.filename))[1]
             vent_map_filename = f"{proposal_id}_ventmap{ext}"
-            vent_map.save(os.path.join(PROPOSALS_DIR, vent_map_filename))
+            vent_map_bytes = vent_map.read()
+            with open(os.path.join(PROPOSALS_DIR, vent_map_filename), "wb") as f:
+                f.write(vent_map_bytes)
         config["_baseUrl"] = request.host_url.rstrip("/")
         lease_type = config.get("leaseType", "performance")
         _logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
@@ -423,10 +473,23 @@ def generate_proposal_link():
         config["_createdAt"] = datetime.now(timezone.utc).isoformat()
         config["_proposalId"] = proposal_id
         with open(os.path.join(PROPOSALS_DIR, f"{proposal_id}.json"), "w") as f: json.dump(config, f)
-        db_store_proposal(proposal_id, config, "draft")
+        # Render/Railway free tiers wipe the filesystem on every redeploy, so the
+        # database is the only durable store. If we can't write to it, fail the
+        # request rather than handing back a link that will 404 after the next
+        # restart.
+        if DATABASE_URL:
+            try:
+                db_store_proposal(proposal_id, config, "draft",
+                                  vent_map_bytes=vent_map_bytes,
+                                  vent_map_filename=vent_map_filename)
+            except Exception as e:
+                print(f"DB error (store_proposal): {e}")
+                traceback.print_exc()
+                return jsonify({"error": "Could not save proposal to database. Please try again.", "detail": str(e)}), 503
         db_log_event(proposal_id, "created")
         return jsonify({"proposalId": proposal_id, "clientUrl": f"/proposal/{proposal_id}", "pdfUrl": f"/api/proposal/{proposal_id}/pdf"})
     except Exception as e:
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 # ─── Send Proposal via Email ───
@@ -741,10 +804,9 @@ def get_proposal_ventmap(pid):
     if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
     cfg = load_proposal_config(pid)
     if not cfg: return jsonify({"error": "Not found"}), 404
-    vm = cfg.get("_ventMapFilename")
-    if not vm: return jsonify({"error": "No vent map"}), 404
-    vmp = os.path.join(PROPOSALS_DIR, vm)
-    if not os.path.exists(vmp): return jsonify({"error": "Vent map file not available"}), 404
+    if not cfg.get("_ventMapFilename"): return jsonify({"error": "No vent map"}), 404
+    vmp = _ensure_vent_map_file(pid, cfg)
+    if not vmp: return jsonify({"error": "Vent map file not available"}), 404
     return send_file(vmp)
 
 # ─── Accept / Sign Proposal ───
@@ -1078,6 +1140,44 @@ def serve_react(path):
         return send_from_directory(app.static_folder, path)
     return send_from_directory(app.static_folder, "index.html")
 
+# ─── Backfill proposals missing from the database ───
+def backfill_proposals_to_db():
+    """Copy any local-only proposals (config + vent map) into Postgres so the
+    DB matches the filesystem. Runs on startup so a container that still has
+    local files can rescue them before the next redeploy wipes everything."""
+    if not DATABASE_URL: return 0
+    restored = 0
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("SELECT id FROM proposals")
+        existing = {row[0] for row in cur.fetchall()}
+        conn.close()
+    except Exception as e:
+        print(f"Backfill: skipping (could not list existing proposals: {e})")
+        return 0
+    for fname in os.listdir(PROPOSALS_DIR):
+        if not fname.endswith(".json") or "_accepted" in fname:
+            continue
+        pid = fname[:-len(".json")]
+        if not validate_pid(pid) or pid in existing:
+            continue
+        try:
+            with open(os.path.join(PROPOSALS_DIR, fname)) as f:
+                cfg = json.load(f)
+            vm_bytes = None
+            vm_name = cfg.get("_ventMapFilename")
+            if vm_name:
+                vmp = os.path.join(PROPOSALS_DIR, vm_name)
+                if os.path.exists(vmp):
+                    with open(vmp, "rb") as vf: vm_bytes = vf.read()
+            db_store_proposal(pid, cfg, status="draft",
+                              vent_map_bytes=vm_bytes, vent_map_filename=vm_name)
+            restored += 1
+            print(f"  Backfilled proposal {pid} into database")
+        except Exception as e:
+            print(f"  Backfill error for {pid}: {e}")
+    return restored
+
 # ─── Backfill taxRate into existing proposals ───
 def backfill_tax_rates():
     """Add taxRate to any proposal config that doesn't have it, using the state tax rate lookup."""
@@ -1124,8 +1224,14 @@ def admin_backfill_tax():
     count = backfill_tax_rates()
     return jsonify({"updated": count, "message": f"Backfilled tax rates for {count} proposals"})
 
-# Run backfill on startup
+# Run backfills on startup
 with app.app_context():
+    print("Reconciling local proposals with database...")
+    n = backfill_proposals_to_db()
+    if n > 0:
+        print(f"Backfilled {n} local proposals into the database.")
+    else:
+        print("Database already has all local proposals.")
     print("Checking proposals for missing tax rates...")
     n = backfill_tax_rates()
     if n > 0:
