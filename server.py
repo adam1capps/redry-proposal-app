@@ -1332,6 +1332,7 @@ async function load(){
  if(d.initDbLastError){html+='<div id="err" style="display:block">init_db last error: <code>'+esc(d.initDbLastError)+'</code></div>'}
  html+='<h2>Rows with <code>error</code> key in config ('+d.rowsWithErrorKey.length+')</h2>'
  if(d.rowsWithErrorKey.length){
+  html+='<p><button id="cleanup-btn" onclick="cleanup()" style="background:#dc2626;color:#fff;border:none">Delete all '+d.rowsWithErrorKey.length+' contaminated rows</button></p>'
   html+='<table><tr><th>ID</th><th>error value</th><th>Project</th><th>Company</th><th>Created</th></tr>'
   d.rowsWithErrorKey.forEach(r=>{html+='<tr><td><code>'+esc(r.id)+'</code></td><td><code>'+esc(r.errorValue)+'</code></td><td>'+esc(r.projectName)+'</td><td>'+esc(r.clientCompany)+'</td><td>'+esc(r.createdAt)+'</td></tr>'})
   html+='</table>'
@@ -1352,6 +1353,16 @@ async function load(){
  } else { html+='<div class="empty">None.</div>' }
  document.getElementById('content').innerHTML=html
 }
+async function cleanup(){
+ const btn=document.getElementById('cleanup-btn')
+ if(!confirm('Delete all rows with the legacy `error` key (contaminated duplicates)? This cascades through proposal_events, signatures, payments. Cannot be undone without a DB backup.'))return
+ if(btn){btn.disabled=true;btn.textContent='Deleting…'}
+ const r=await fetch('/api/admin/cleanup-error-rows',{method:'POST',credentials:'include'})
+ if(!r.ok){alert('Cleanup failed: HTTP '+r.status);if(btn){btn.disabled=false;btn.textContent='Retry delete'}return}
+ const d=await r.json()
+ alert('Deleted '+d.deleted+' proposal rows. Cascaded: '+JSON.stringify(d.cascaded))
+ load()
+}
 load()
 </script>
 </body></html>"""
@@ -1359,6 +1370,58 @@ load()
 @app.route("/admin")
 def admin_page():
     return _ADMIN_HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/api/admin/cleanup-error-rows", methods=["POST"])
+def admin_cleanup_error_rows():
+    """One-shot cleanup of proposals whose config has a stray `error` key.
+    Those rows are duplicate junk from the contamination bug fixed in #22 —
+    they share project/company with legitimate rows but were created by the
+    SPA forwarding 404 form state. Cascades through proposal_events,
+    signatures, payments to satisfy the FK constraints, all in a single
+    transaction so a mid-run failure rolls back cleanly."""
+    if not _is_session_authed():
+        return jsonify({"error": "Unauthorized"}), 401
+    if not DATABASE_URL:
+        return jsonify({"error": "No database configured"}), 400
+    conn = get_db()
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        # Materialize the target IDs once; the WHERE-IN subquery would
+        # otherwise re-run after each dependent table delete and miss rows
+        # that some other request races into existence (or, in the trash
+        # case, get cleaned before we get to them).
+        cur.execute("SELECT id FROM proposals WHERE config ? 'error'")
+        target_ids = [r[0] for r in cur.fetchall()]
+        if not target_ids:
+            conn.close()
+            return jsonify({"deleted": 0, "ids": []})
+        cur.execute("DELETE FROM proposal_events WHERE proposal_id = ANY(%s)", (target_ids,))
+        events_deleted = cur.rowcount
+        cur.execute("DELETE FROM signatures WHERE proposal_id = ANY(%s)", (target_ids,))
+        sigs_deleted = cur.rowcount
+        cur.execute("DELETE FROM payments WHERE proposal_id = ANY(%s)", (target_ids,))
+        payments_deleted = cur.rowcount
+        cur.execute("DELETE FROM proposals WHERE id = ANY(%s)", (target_ids,))
+        proposals_deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        return jsonify({
+            "deleted": proposals_deleted,
+            "ids": target_ids,
+            "cascaded": {
+                "proposal_events": events_deleted,
+                "signatures": sigs_deleted,
+                "payments": payments_deleted,
+            },
+        })
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"admin_cleanup_error_rows: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 # ─── Catch-all for React SPA ───
