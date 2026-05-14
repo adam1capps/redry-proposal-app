@@ -250,6 +250,72 @@ PROPOSALS_DIR = os.path.join(BASE_DIR, "proposals")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PROPOSALS_DIR, exist_ok=True)
 
+def load_proposal_config(pid):
+    """Load config from local file or DB. Render's filesystem is ephemeral,
+    so the DB is the authoritative store after restarts."""
+    p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
+    if os.path.exists(p):
+        with open(p) as f: return json.load(f)
+    if not DATABASE_URL: return None
+    try:
+        conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT config FROM proposals WHERE id=%s", (pid,))
+        row = cur.fetchone(); conn.close()
+        if not row: return None
+        cfg = row["config"]
+        if isinstance(cfg, str): cfg = json.loads(cfg)
+        return cfg
+    except Exception as e:
+        print(f"DB error (load_proposal_config): {e}")
+        return None
+
+def is_proposal_accepted(pid):
+    """Check if proposal already accepted (file marker or DB signature)."""
+    if os.path.exists(os.path.join(PROPOSALS_DIR, f"{pid}_accepted.json")):
+        return True
+    if not DATABASE_URL: return False
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("SELECT 1 FROM signatures WHERE proposal_id=%s LIMIT 1", (pid,))
+        row = cur.fetchone(); conn.close()
+        return row is not None
+    except Exception as e:
+        print(f"DB error (is_proposal_accepted): {e}")
+        return False
+
+def get_or_regenerate_pdf(pid, client_facing=False):
+    """Return PDF bytes for the proposal. Uses cached file if available,
+    otherwise regenerates from DB config."""
+    suffix = "_client.pdf" if client_facing else ".pdf"
+    p = os.path.join(PROPOSALS_DIR, f"{pid}{suffix}")
+    if os.path.exists(p):
+        with open(p, "rb") as f: return f.read()
+    cfg = load_proposal_config(pid)
+    if not cfg: return None
+    lease_type = cfg.get("leaseType", "performance")
+    logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
+    vmap = None
+    vmf = cfg.get("_ventMapFilename")
+    if vmf:
+        vmp = os.path.join(PROPOSALS_DIR, vmf)
+        if os.path.exists(vmp): vmap = vmp
+    try:
+        if client_facing:
+            pdf_bytes = (generate_fixed_client_pdf(cfg, logo_path=logo, vent_map_path=vmap)
+                         if lease_type == "fixed"
+                         else generate_client_pdf(cfg, logo_path=logo, vent_map_path=vmap))
+        else:
+            pdf_bytes = (generate_fixed_proposal_pdf(cfg, logo_path=logo, vent_map_path=vmap)
+                         if lease_type == "fixed"
+                         else generate_proposal_pdf(cfg, logo_path=logo, vent_map_path=vmap))
+        try:
+            with open(p, "wb") as f: f.write(pdf_bytes)
+        except Exception: pass
+        return pdf_bytes
+    except Exception as e:
+        print(f"PDF regeneration error for {pid}: {e}")
+        return None
+
 STATE_TAX_RATES = {
     "AL": 0.04, "AK": 0.00, "AZ": 0.056, "AR": 0.065, "CA": 0.0725,
     "CO": 0.029, "CT": 0.0635, "DE": 0.00, "FL": 0.06, "GA": 0.04,
@@ -368,9 +434,8 @@ def generate_proposal_link():
 @require_auth
 def send_proposal(pid):
     if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
-    p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
-    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
-    with open(p) as f: cfg = json.load(f)
+    cfg = load_proposal_config(pid)
+    if not cfg: return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     to_email = data.get("email") or cfg.get("clientEmail", "")
     if not to_email: return jsonify({"error": "No email address provided"}), 400
@@ -555,9 +620,8 @@ def send_proposal(pid):
 @require_auth
 def send_for_approval(pid):
     if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
-    p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
-    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
-    with open(p) as f: cfg = json.load(f)
+    cfg = load_proposal_config(pid)
+    if not cfg: return jsonify({"error": "Not found"}), 404
     company = html_escape(cfg.get("clientCompany", "Client"))
     project = html_escape(cfg.get("projectName", "Project"))
     address = html_escape(cfg.get("projectAddress", ""))
@@ -652,25 +716,7 @@ def send_for_approval(pid):
 @app.route("/api/proposal/<pid>")
 def get_proposal_config(pid):
     if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
-    cfg = None
-    p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
-    if os.path.exists(p):
-        print(f"[get_proposal_config] Loading {pid} from file")
-        with open(p) as f: cfg = json.load(f)
-    elif DATABASE_URL:
-        try:
-            conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT config FROM proposals WHERE id=%s", (pid,))
-            row = cur.fetchone(); conn.close()
-            if row:
-                cfg = row["config"]
-                if isinstance(cfg, str): cfg = json.loads(cfg)
-                print(f"[get_proposal_config] Loaded {pid} from DB, keys: {list(cfg.keys()) if isinstance(cfg, dict) else type(cfg)}")
-            else:
-                print(f"[get_proposal_config] Proposal {pid} not found in DB")
-        except Exception as e: print(f"DB error (get_proposal_config): {e}")
-    else:
-        print(f"[get_proposal_config] No file for {pid} and no DATABASE_URL configured")
+    cfg = load_proposal_config(pid)
     if not cfg: return jsonify({"error": "Not found"}), 404
     db_update_status_if_earlier(pid, "viewed", "viewed_at")
     db_log_event(pid, "viewed", {"ip": request.headers.get("X-Forwarded-For", request.remote_addr), "ua": request.headers.get("User-Agent", "")[:200]})
@@ -679,36 +725,35 @@ def get_proposal_config(pid):
 @app.route("/api/proposal/<pid>/pdf")
 def get_proposal_pdf(pid):
     if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
-    p = os.path.join(PROPOSALS_DIR, f"{pid}.pdf")
-    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
-    return send_file(p, mimetype="application/pdf")
+    pdf_bytes = get_or_regenerate_pdf(pid)
+    if not pdf_bytes: return jsonify({"error": "Not found"}), 404
+    return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf")
 
 @app.route("/api/proposal/<pid>/client-pdf")
 def get_client_pdf(pid):
     if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
-    p = os.path.join(PROPOSALS_DIR, f"{pid}_client.pdf")
-    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
-    return send_file(p, mimetype="application/pdf")
+    pdf_bytes = get_or_regenerate_pdf(pid, client_facing=True)
+    if not pdf_bytes: return jsonify({"error": "Not found"}), 404
+    return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf")
 
 @app.route("/api/proposal/<pid>/ventmap")
 def get_proposal_ventmap(pid):
     if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
-    p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
-    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
-    with open(p) as f: cfg = json.load(f)
+    cfg = load_proposal_config(pid)
+    if not cfg: return jsonify({"error": "Not found"}), 404
     vm = cfg.get("_ventMapFilename")
     if not vm: return jsonify({"error": "No vent map"}), 404
-    return send_file(os.path.join(PROPOSALS_DIR, vm))
+    vmp = os.path.join(PROPOSALS_DIR, vm)
+    if not os.path.exists(vmp): return jsonify({"error": "Vent map file not available"}), 404
+    return send_file(vmp)
 
 # ─── Accept / Sign Proposal ───
 @app.route("/api/proposal/<pid>/accept", methods=["POST"])
 def accept_proposal(pid):
     if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
-    p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
-    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
-    accepted_path = os.path.join(PROPOSALS_DIR, f"{pid}_accepted.json")
-    if os.path.exists(accepted_path): return jsonify({"error": "already_accepted", "status": "accepted"}), 409
-    with open(p) as f: cfg = json.load(f)
+    cfg = load_proposal_config(pid)
+    if not cfg: return jsonify({"error": "Not found"}), 404
+    if is_proposal_accepted(pid): return jsonify({"error": "already_accepted", "status": "accepted"}), 409
     acc = request.get_json() or {}
     now = datetime.now(timezone.utc)
     sig_proof = {
@@ -723,14 +768,13 @@ def accept_proposal(pid):
     acc["_acceptedAt"] = now.isoformat()
     acc["_ipAddress"] = sig_proof["ipAddress"]
     acc["_userAgent"] = sig_proof["userAgent"]
-    with open(os.path.join(PROPOSALS_DIR, f"{pid}_accepted.json"), "w") as f: json.dump(acc, f)
+    try:
+        with open(os.path.join(PROPOSALS_DIR, f"{pid}_accepted.json"), "w") as f: json.dump(acc, f)
+    except Exception: pass
     db_store_signature(pid, sig_proof)
     db_update_status(pid, "signed", "signed_at")
     db_log_event(pid, "signed", sig_proof)
-    pdf_path = os.path.join(PROPOSALS_DIR, f"{pid}.pdf")
-    pdf_bytes = None
-    if os.path.exists(pdf_path):
-        with open(pdf_path, "rb") as f: pdf_bytes = f.read()
+    pdf_bytes = get_or_regenerate_pdf(pid)
     project = html_escape(cfg.get("projectName", "Project")); company = html_escape(cfg.get("clientCompany", "Client"))
     contact = html_escape(cfg.get("clientContact", "")); client_email = cfg.get("clientEmail", "")
     section = html_escape(cfg.get("projectSection", "")); signer = html_escape(acc.get("name", "Unknown"))
@@ -786,9 +830,8 @@ def create_checkout_session():
         if amount_cents <= 0: return jsonify({"error": "Invalid amount"}), 400
         proposal_id = data.get("proposalId", "")
         if not validate_pid(proposal_id): return jsonify({"error": "Invalid proposal ID"}), 400
-        p = os.path.join(PROPOSALS_DIR, f"{proposal_id}.json")
-        if not os.path.exists(p): return jsonify({"error": "Proposal not found"}), 404
-        with open(p) as f: cfg = json.load(f)
+        cfg = load_proposal_config(proposal_id)
+        if not cfg: return jsonify({"error": "Proposal not found"}), 404
         option = data.get("option", 2)
         if cfg.get("leaseType") == "fixed" and option != 1:
             return jsonify({"error": "Fixed Lease requires full payment (option 1)"}), 400
@@ -875,9 +918,8 @@ def _record_payment(pid, cfg, option, payment_number, amount, method, ip_address
 @app.route("/api/proposal/<pid>/payment-confirm", methods=["POST"])
 def payment_confirm(pid):
     if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
-    p = os.path.join(PROPOSALS_DIR, f"{pid}.json")
-    if not os.path.exists(p): return jsonify({"error": "Not found"}), 404
-    with open(p) as f: cfg = json.load(f)
+    cfg = load_proposal_config(pid)
+    if not cfg: return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     session_id = data.get("sessionId", "")
     if session_id and stripe.api_key:
