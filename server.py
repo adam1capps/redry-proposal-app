@@ -1211,8 +1211,19 @@ def admin_diagnostics():
         out["schemaOk"] = {"id", "config", "status", "vent_map_bytes", "vent_map_filename"} <= cols
         cur.execute("SELECT COUNT(*) AS n FROM proposals")
         out["totalProposals"] = cur.fetchone()["n"]
-        cur.execute("SELECT id FROM proposals WHERE config ? 'error' ORDER BY created_at DESC")
-        out["rowsWithErrorKey"] = [r["id"] for r in cur.fetchall()]
+        cur.execute("""SELECT id,
+                              config->>'error' AS error_value,
+                              config->>'projectName' AS project_name,
+                              config->>'clientCompany' AS client_company,
+                              created_at
+                       FROM proposals WHERE config ? 'error' ORDER BY created_at DESC""")
+        out["rowsWithErrorKey"] = [{
+            "id": r["id"],
+            "errorValue": r["error_value"],
+            "projectName": r["project_name"] or "",
+            "clientCompany": r["client_company"] or "",
+            "createdAt": r["created_at"].isoformat() if r["created_at"] else None,
+        } for r in cur.fetchall()]
         cur.execute("""SELECT id, config->>'projectName' AS project_name,
                               config->>'clientCompany' AS client_company,
                               config->>'clientContact' AS client_contact,
@@ -1305,7 +1316,11 @@ async function load(){
  let html='<div class="row">'+cards.map(c=>'<div class="card"><div class="label">'+c[0]+'</div><div class="v">'+c[1]+'</div></div>').join('')+'</div>'
  if(d.initDbLastError){html+='<div id="err" style="display:block">init_db last error: <code>'+esc(d.initDbLastError)+'</code></div>'}
  html+='<h2>Rows with <code>error</code> key in config ('+d.rowsWithErrorKey.length+')</h2>'
- html+=d.rowsWithErrorKey.length?'<ul>'+d.rowsWithErrorKey.map(id=>'<li><code>'+esc(id)+'</code></li>').join('')+'</ul>':'<div class="empty">None.</div>'
+ if(d.rowsWithErrorKey.length){
+  html+='<table><tr><th>ID</th><th>error value</th><th>Project</th><th>Company</th><th>Created</th></tr>'
+  d.rowsWithErrorKey.forEach(r=>{html+='<tr><td><code>'+esc(r.id)+'</code></td><td><code>'+esc(r.errorValue)+'</code></td><td>'+esc(r.projectName)+'</td><td>'+esc(r.clientCompany)+'</td><td>'+esc(r.createdAt)+'</td></tr>'})
+  html+='</table>'
+ } else { html+='<div class="empty">None.</div>' }
  html+='<h2>Shadowed IDs &mdash; local file disagrees with DB ('+d.shadowedIds.length+')</h2>'
  if(d.shadowedIds.length){
   html+='<table><tr><th>ID</th><th>File: project / company</th><th>DB: project / company</th><th>Note</th></tr>'
