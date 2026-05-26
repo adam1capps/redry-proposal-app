@@ -444,17 +444,48 @@ def get_google_maps_key():
     return jsonify({"key": GOOGLE_MAPS_KEY})
 
 # ─── PDF Generation ───
-def _sanitize_incoming_config(config):
-    """Strip junk keys the SPA can accidentally leak into form state.
+# Canonical set of form keys the proposal builder produces. Mirrors the
+# SPA's defaultForm + defaultFixedForm objects (static/index.html). Server-set
+# metadata (_baseUrl, _createdAt, _ventMapFilename) is deliberately NOT in
+# the allowlist — the handlers overwrite those after sanitize, and the client
+# has no business sending them. _proposalId is allowed because the SPA round-
+# trips it to request an update of an existing proposal.
+ALLOWED_CONFIG_KEYS = frozenset({
+    # shared
+    "leaseType",
+    "clientCompany", "clientContact", "clientTitle", "clientPhone", "clientEmail",
+    "projectName", "projectAddress", "projectCity", "projectState", "projectZip",
+    "projectSection",
+    "proposalDate", "validDays", "taxRate",
+    # performance-lease
+    "wetSF", "ratePSF", "scanCost", "numScans", "scanInterval", "totalVents",
+    "waiveScans", "hideScans", "hidePricing",
+    "showOption0", "showOption1", "showOption2",
+    "showCustomOption", "customOptionLabel", "customOptionAdj", "customOptionPayments",
+    # fixed-lease
+    "numVents", "ventRate", "leaseTerm", "installFee",
+    "shipAddress", "shipCity", "shipState", "shipZip",
+    # round-trip metadata
+    "_proposalId",
+})
 
-    The unguarded merge in the Past Proposals loader used to pull
-    {"error":"Not found"} into form state when the proposal didn't exist,
-    saveForm() then persisted it to localStorage, and every subsequent
-    /api/generate-proposal-link POST carried the error key into the DB.
-    The client is now patched, but strip server-side as a defense in depth.
-    `error` is never a legitimate config key."""
-    if isinstance(config, dict):
-        config.pop("error", None)
+def _sanitize_incoming_config(config):
+    """Whitelist filter: drop any keys not in ALLOWED_CONFIG_KEYS.
+
+    Replaces an earlier blacklist that only popped `error`. A blacklist is
+    one bug behind by design — when an older SPA bug merged {"error":...}
+    into form state and saveForm() persisted it, every subsequent
+    /api/generate-proposal-link POST carried the junk into the DB. A
+    whitelist closes the class rather than chasing individual keys.
+    Mutates `config` in place to preserve the existing caller contract.
+    """
+    if not isinstance(config, dict):
+        return config
+    dropped = [k for k in list(config) if k not in ALLOWED_CONFIG_KEYS]
+    for k in dropped:
+        config.pop(k, None)
+    if dropped:
+        print(f"[sanitize] dropped non-whitelisted config keys: {dropped}")
     return config
 
 @app.route("/api/generate-pdf", methods=["POST"])
