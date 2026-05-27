@@ -74,6 +74,28 @@ check("GET /admin is HTML", b"<html" in r.data.lower(), "no <html> in body")
 r = client.get("/api/tax-rate?state=TX")
 check("GET /api/tax-rate?state=TX -> 200", r.status_code == 200, f"got {r.status_code}")
 
+# 10. Whitelist sanitizer keeps allowed form keys and drops everything else.
+sample = {
+    "clientCompany": "Acme",
+    "projectName": "Crockett",
+    "leaseType": "performance",
+    "wetSF": "11600",
+    "_proposalId": "abcdef123456",
+    # Junk that must be dropped:
+    "error": "Not found",
+    "foo": "bar",
+    "_baseUrl": "https://evil.example.com",
+    "_createdAt": "1970-01-01",
+}
+server._sanitize_incoming_config(sample)
+check("sanitize keeps clientCompany", sample.get("clientCompany") == "Acme")
+check("sanitize keeps _proposalId", sample.get("_proposalId") == "abcdef123456")
+check("sanitize drops error", "error" not in sample)
+check("sanitize drops arbitrary foo", "foo" not in sample)
+check("sanitize drops client-sent _baseUrl", "_baseUrl" not in sample)
+check("sanitize drops client-sent _createdAt", "_createdAt" not in sample)
+check("sanitize tolerates non-dict input", server._sanitize_incoming_config(None) is None)
+
 print()
 if failures:
     print(f"{len(failures)} smoke check(s) FAILED: {', '.join(failures)}")
