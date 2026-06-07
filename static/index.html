@@ -774,12 +774,15 @@ function FixedLeaseBuilder({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink
       <SecLabel>Shipping Address</SecLabel>
       <p style={{fontSize:12,color:C.gray,margin:"0 0 8px",lineHeight:1.5}}>Where should we ship the vents? Leave blank if same as project address.</p>
       <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
-        <Inp label="Street Address" value={form.shipAddress} onChange={s("shipAddress")} placeholder="123 Warehouse Blvd"/>
+        <AddressAutocomplete value={form.shipAddress} onChange={s("shipAddress")} placeholder="123 Warehouse Blvd"
+          onPlaceSelect={({address,city,state,zip})=>{
+            setForm(f=>({...f, shipAddress:address, shipCity:city, shipState:state, shipZip:zip}));
+          }}/>
       </div>
       <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
-        <Inp label="City" value={form.shipCity} onChange={s("shipCity")} placeholder="Austin" third/>
-        <Inp label="State" value={form.shipState} onChange={s("shipState")} placeholder="TX" third/>
-        <Inp label="ZIP" value={form.shipZip} onChange={s("shipZip")} placeholder="78745" third/>
+        <Inp label="City" value={form.shipCity} onChange={s("shipCity")} placeholder="Austin" third autoComplete="address-level2"/>
+        <Inp label="State" value={form.shipState} onChange={s("shipState")} placeholder="TX" third autoComplete="address-level1"/>
+        <Inp label="ZIP" value={form.shipZip} onChange={s("shipZip")} placeholder="78745" third autoComplete="postal-code"/>
       </div>
 
       <SecLabel>Pricing</SecLabel>
