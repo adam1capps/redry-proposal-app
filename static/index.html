@@ -1433,14 +1433,178 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
   </div>);
 }
 
+// ─── PIPELINE / ANALYTICS ───
+function MiniBarChart({data}) {
+  // Inline SVG, no chart libs. Pair of bars per month: sent (navy) + signed
+  // (green). Heights are count-based; the <title> tooltips carry the $ value
+  // so the chart stays scannable but the detail is one hover away.
+  if(!data || !data.length) return <div style={{color:C.gray,fontSize:12,padding:20,textAlign:"center"}}>No data yet.</div>;
+  const maxCount = Math.max(1, ...data.map(d=>Math.max(d.sentCount, d.signedCount)));
+  const colW = 18, gap = 4, padL = 24, padT = 8, padB = 16;
+  const chartH = 80;
+  const totalW = padL + data.length * (colW + gap);
+  const totalH = chartH + padT + padB;
+  const yFor = c => padT + (chartH - (c/maxCount) * chartH);
+  return (
+    <svg viewBox={`0 0 ${totalW} ${totalH}`} style={{width:"100%",height:"auto",display:"block"}} preserveAspectRatio="xMinYMid meet">
+      <line x1={padL} y1={padT+chartH} x2={totalW} y2={padT+chartH} stroke={C.border}/>
+      {data.map((d, i) => {
+        const x = padL + i * (colW + gap);
+        const sentH = chartH - (yFor(d.sentCount) - padT);
+        const signH = chartH - (yFor(d.signedCount) - padT);
+        return (
+          <g key={d.month}>
+            <rect x={x} y={yFor(d.sentCount)} width={(colW/2)-1} height={sentH} fill={C.navy}>
+              <title>{`${d.label}: sent ${d.sentCount} (${fmtC(d.sentValue)})`}</title>
+            </rect>
+            <rect x={x+colW/2+1} y={yFor(d.signedCount)} width={(colW/2)-1} height={signH} fill={C.green}>
+              <title>{`${d.label}: signed ${d.signedCount} (${fmtC(d.signedValue)})`}</title>
+            </rect>
+            <text x={x+colW/2} y={padT+chartH+10} fontSize={6} fill={C.gray} textAnchor="middle">{d.label}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function DeltaBadge({pct}) {
+  if(pct === null || pct === undefined) return <span style={{color:C.gray,fontSize:11}}>—</span>;
+  const up = pct >= 0;
+  const color = up ? C.green : "#dc2626";
+  const arrow = up ? "▲" : "▼";
+  const sign = up ? "+" : "";
+  return <span style={{color,fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{arrow} {sign}{(pct*100).toFixed(0)}%</span>;
+}
+
+function PipelinePanel({analytics}) {
+  if(!analytics) return <div style={{textAlign:"center",color:C.gray,padding:40}}>Analytics unavailable.</div>;
+  if(!analytics.ok) return <div style={{textAlign:"center",color:C.gray,padding:40}}>Analytics require database access. Connect Postgres to populate this view.</div>;
+  const {pipeline, monthly, periods, staleBids, funnel} = analytics;
+  const statusColor = s => ({draft:"#94a3b8",sent:"#3b82f6",viewed:"#8b5cf6",signed:C.green,paid:C.green}[s]||"#94a3b8");
+  const statusLabel = s => ({draft:"Draft",sent:"Sent",viewed:"Viewed",signed:"Signed",paid:"Paid"}[s]||s);
+  const card = {background:"#fff",borderRadius:10,border:`1px solid ${C.border}`,padding:"18px 20px",marginBottom:16};
+  const sectionHead = {fontSize:13,fontWeight:700,color:C.navy,textTransform:"uppercase",letterSpacing:1,marginBottom:12};
+  const th = {padding:"8px 10px",textAlign:"left",fontSize:11,fontWeight:700,color:C.gray,textTransform:"uppercase",letterSpacing:0.5,borderBottom:`2px solid ${C.border}`,whiteSpace:"nowrap"};
+  const td = {padding:"8px 10px",fontSize:13,color:C.dark,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap"};
+  return (
+    <div>
+      {/* Pipeline funnel: count + $ per current status */}
+      <div style={card}>
+        <div style={sectionHead}>Current pipeline by status</div>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+          {pipeline.map(s => (
+            <div key={s.status} style={{flex:"1 1 140px",minWidth:140,background:"#f8f9fb",borderRadius:8,padding:"14px 14px",borderLeft:`4px solid ${statusColor(s.status)}`}}>
+              <div style={{fontSize:11,fontWeight:700,color:statusColor(s.status),textTransform:"uppercase",letterSpacing:0.5}}>{statusLabel(s.status)}</div>
+              <div style={{fontSize:22,fontWeight:800,color:C.navy,marginTop:4,fontFamily:"'Playfair Display',serif"}}>{s.count}</div>
+              <div style={{fontSize:12,color:C.gray,marginTop:2}}>{fmtC(s.value)}</div>
+            </div>
+          ))}
+        </div>
+        {funnel && (
+          <div style={{display:"flex",gap:16,flexWrap:"wrap",marginTop:14,fontSize:12,color:C.gray}}>
+            <span>Sent &rarr; Viewed: <strong style={{color:C.navy}}>{funnel.sentToViewed === null ? "—" : fmtPct(funnel.sentToViewed)}</strong></span>
+            <span>Viewed &rarr; Signed: <strong style={{color:C.navy}}>{funnel.viewedToSigned === null ? "—" : fmtPct(funnel.viewedToSigned)}</strong></span>
+            <span>Signed &rarr; Paid: <strong style={{color:C.navy}}>{funnel.signedToPaid === null ? "—" : fmtPct(funnel.signedToPaid)}</strong></span>
+            <span>Overall win rate (Sent &rarr; Signed): <strong style={{color:C.navy}}>{funnel.sentToSigned === null ? "—" : fmtPct(funnel.sentToSigned)}</strong></span>
+          </div>
+        )}
+      </div>
+
+      {/* 12-month trend chart */}
+      <div style={card}>
+        <div style={sectionHead}>Sent vs Signed &mdash; trailing 12 months</div>
+        <div style={{display:"flex",gap:12,fontSize:11,color:C.gray,marginBottom:6}}>
+          <span><span style={{display:"inline-block",width:10,height:10,background:C.navy,marginRight:4,verticalAlign:"middle"}}/>Sent</span>
+          <span><span style={{display:"inline-block",width:10,height:10,background:C.green,marginRight:4,verticalAlign:"middle"}}/>Signed</span>
+        </div>
+        <MiniBarChart data={monthly}/>
+      </div>
+
+      {/* Period table with deltas */}
+      <div style={card}>
+        <div style={sectionHead}>Period comparison</div>
+        <p style={{fontSize:11,color:C.gray,margin:"0 0 10px"}}>
+          Win rate is signed-in-period over sent-in-period (a flow rate, not a cohort rate). Delta vs the comparable prior window.
+          To-date windows (MTD, QTD, YTD, last 12mo) compare against the same number of elapsed days in the prior period.
+        </p>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>
+              <th style={th}>Period</th>
+              <th style={th}>Sent</th>
+              <th style={th}>Sent $</th>
+              <th style={th}>Signed</th>
+              <th style={th}>Signed $</th>
+              <th style={th}>Win rate</th>
+              <th style={th}>Collected</th>
+              <th style={th}>vs prior</th>
+            </tr></thead>
+            <tbody>
+              {periods.map(p => (
+                <tr key={p.key}>
+                  <td style={{...td,fontWeight:600,color:C.navy}}>{p.label}<br/>
+                    <span style={{fontSize:10,color:C.gray,fontWeight:400}}>{p.start}{p.end && p.end !== p.start ? ` – ${p.end}` : ""}</span>
+                  </td>
+                  <td style={td}>{p.sentCount}</td>
+                  <td style={td}>{fmtC(p.sentValue)}</td>
+                  <td style={td}>{p.signedCount}</td>
+                  <td style={td}>{fmtC(p.signedValue)}</td>
+                  <td style={td}>{p.winRate === null ? "—" : fmtPct(p.winRate)}</td>
+                  <td style={td}>{fmtC(p.collectedValue)}</td>
+                  <td style={td}>
+                    {p.delta ? (
+                      <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                        <span style={{fontSize:10,color:C.gray}}>Sent $ <DeltaBadge pct={p.delta.sentValuePct}/></span>
+                        <span style={{fontSize:10,color:C.gray}}>Signed $ <DeltaBadge pct={p.delta.signedValuePct}/></span>
+                      </div>
+                    ) : <span style={{color:C.gray,fontSize:11}}>—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Stale bids */}
+      <div style={card}>
+        <div style={sectionHead}>Stale bids ({staleBids.length})</div>
+        <p style={{fontSize:11,color:C.gray,margin:"0 0 10px"}}>
+          Sent or viewed proposals with no engagement in the last {analytics.staleDays} days. These are the ones worth a follow-up call.
+        </p>
+        {staleBids.length === 0 ? (
+          <div style={{color:C.gray,fontSize:13,padding:14,textAlign:"center"}}>Nothing stale &mdash; you're current.</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {staleBids.slice(0, 20).map(b => (
+              <div key={b.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"10px 12px",background:"#fffaf3",border:`1px solid ${C.orange}`,borderRadius:6}}>
+                <div style={{minWidth:0,flex:1}}>
+                  <div style={{fontWeight:600,color:C.navy,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.projectName || "Untitled"}</div>
+                  <div style={{fontSize:11,color:C.gray}}>{b.clientCompany || "—"} &middot; {statusLabel(b.status)} &middot; {fmtC(b.value)}</div>
+                </div>
+                <div style={{fontSize:11,color:"#dc2626",fontWeight:700,whiteSpace:"nowrap"}}>{b.daysStale}d stale</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── DASHBOARD ───
 function Dashboard({onBack}) {
   const [data, setData] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("proposals");
+  const [tab, setTab] = useState("pipeline");
 
   useEffect(() => {
-    authFetch(`${API}/api/dashboard`).then(r=>r.json()).then(d=>{setData(d);setLoading(false);}).catch(()=>setLoading(false));
+    Promise.all([
+      authFetch(`${API}/api/dashboard`).then(r=>r.json()).catch(()=>null),
+      authFetch(`${API}/api/analytics`).then(r=>r.json()).catch(()=>null),
+    ]).then(([d, a]) => { setData(d); setAnalytics(a); setLoading(false); });
   }, []);
 
   const fmtDate = d => d ? new Date(d).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}) : "—";
@@ -1492,11 +1656,15 @@ function Dashboard({onBack}) {
     </div>
 
     {/* Tabs */}
-    <div style={{display:"flex",gap:8,marginBottom:16}}>
+    <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+      {tabBtn("pipeline", "Pipeline")}
       {tabBtn("proposals", `Proposals (${proposals.length})`)}
       {tabBtn("signatures", `Signatures (${signatures.length})`)}
       {tabBtn("payments", `Payments (${payments.length})`)}
     </div>
+
+    {/* Pipeline analytics */}
+    {tab==="pipeline" && <PipelinePanel analytics={analytics}/>}
 
     {/* Proposals table */}
     {tab==="proposals" && <div style={{background:"#fff",borderRadius:10,border:`1px solid ${C.border}`,overflowX:"auto"}}>

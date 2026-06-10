@@ -96,6 +96,31 @@ check("sanitize drops client-sent _baseUrl", "_baseUrl" not in sample)
 check("sanitize drops client-sent _createdAt", "_createdAt" not in sample)
 check("sanitize tolerates non-dict input", server._sanitize_incoming_config(None) is None)
 
+# 11. proposal_value: the revenue lens for analytics. Every assertion below
+#     pins a behavior that, if wrong, would silently mis-report the pipeline.
+check("value perf strings",
+      server.proposal_value({"wetSF":"11600","ratePSF":"2.00","scanCost":"4500","numScans":"4"}) == 41200.0)
+check("value perf waived scans drop to base only",
+      server.proposal_value({"wetSF":"1000","ratePSF":"2","scanCost":"4500","numScans":"4","waiveScans":True}) == 2000.0)
+check("value fixed (leaseTerm is NOT multiplied)",
+      server.proposal_value({"leaseType":"fixed","numVents":"5","ventRate":"1000","leaseTerm":"12","installFee":"500"}) == 5500.0)
+check("value hidePricing is 0",
+      server.proposal_value({"wetSF":"1000","ratePSF":"2","hidePricing":True}) == 0.0)
+check("value empty config is 0", server.proposal_value({}) == 0.0)
+check("value non-dict is 0", server.proposal_value(None) == 0.0)
+check("value garbage strings tolerated",
+      server.proposal_value({"wetSF":"abc","ratePSF":None,"scanCost":"","numScans":"x"}) == 0.0)
+
+# 12. Analytics endpoint degrades to a shaped empty when DB is unavailable.
+r = client.get("/api/analytics")
+check("GET /api/analytics -> 200", r.status_code == 200, f"got {r.status_code}")
+if r.status_code == 200:
+    a = r.get_json() or {}
+    for key in ("pipeline", "funnel", "staleBids", "monthly", "periods", "timezone", "generatedAt"):
+        check(f"analytics has '{key}'", key in a, f"missing {key}")
+    check("analytics ok=False when no DB", a.get("ok") is False, f"got {a.get('ok')}")
+    check("analytics periods is a list", isinstance(a.get("periods"), list))
+
 print()
 if failures:
     print(f"{len(failures)} smoke check(s) FAILED: {', '.join(failures)}")
