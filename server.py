@@ -6,9 +6,15 @@ PostgreSQL storage, Stripe payments, SendGrid emails, proposal lifecycle trackin
 
 from flask import Flask, request, jsonify, send_file, send_from_directory, session
 from flask_cors import CORS
-from proposal_generator import generate_proposal_pdf, generate_client_pdf, generate_fixed_proposal_pdf, generate_fixed_client_pdf
+from proposal_generator import (generate_proposal_pdf, generate_client_pdf,
+    generate_fixed_proposal_pdf, generate_fixed_client_pdf, safe_float, safe_int)
 import os, io, json, uuid, stripe, traceback, psycopg2, psycopg2.extras, hashlib, secrets, functools, hmac, re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:
+    ZoneInfo = None
+    ZoneInfoNotFoundError = Exception
 from html import escape as html_escape
 from werkzeug.utils import secure_filename
 
@@ -424,6 +430,113 @@ def parse_tax_rate(cfg):
     if val > 1:
         val = val / 100
     return val
+
+# ─── Analytics helpers ───
+def proposal_value(cfg):
+    """Pre-tax bid value in dollars (float) for analytics.
+
+    Mirrors the standard (no-adjustment) option in the SPA's calcOptions /
+    calcFixedOptions and the send-email math:
+      performance: wetSF*ratePSF + (scanCost*numScans unless waiveScans)
+      fixed:       numVents*ventRate + installFee   (leaseTerm is display-only)
+    Numeric defaults are 0 (NOT the SPA's display defaults) so junk/legacy
+    rows don't fabricate phantom revenue. hidePricing rows are $0 — they
+    are reframed as complimentary. Pre-tax: tax is pass-through.
+    """
+    if not isinstance(cfg, dict):
+        return 0.0
+    def _truthy(v):
+        return v is True or v == 1 or (isinstance(v, str) and v.lower() == "true")
+    if _truthy(cfg.get("hidePricing")):
+        return 0.0
+    if cfg.get("leaseType") == "fixed":
+        return round(safe_int(cfg.get("numVents", 0)) * safe_float(cfg.get("ventRate", 0))
+                     + safe_float(cfg.get("installFee", 0)), 2)
+    base = safe_float(cfg.get("wetSF", 0)) * safe_float(cfg.get("ratePSF", 0))
+    scans = 0.0 if _truthy(cfg.get("waiveScans")) else \
+            safe_float(cfg.get("scanCost", 0)) * safe_int(cfg.get("numScans", 0))
+    return round(base + scans, 2)
+
+BUSINESS_TZ_NAME = "America/Chicago"
+def _business_tz():
+    if ZoneInfo is None:
+        return timezone.utc
+    try:
+        return ZoneInfo(BUSINESS_TZ_NAME)
+    except ZoneInfoNotFoundError:
+        return timezone.utc
+
+def _period_windows(now_local):
+    """Return {key: (start, end, prev_start, prev_end, label)} in business-local
+    time. Prior windows for MTD/QTD/YTD/last12mo use the SAME elapsed duration
+    as the current window so mid-period comparisons are honest (true MoM/QoQ/
+    YoY). lastWeek/lastMonth/lastQuarter/lastYear are the previous complete
+    period vs the one before that.
+    """
+    tz = now_local.tzinfo
+    def D(y, m, d, h=0, mi=0):
+        return datetime(y, m, d, h, mi, tzinfo=tz)
+    y, m, d = now_local.year, now_local.month, now_local.day
+    week_start = D(y, m, d) - timedelta(days=now_local.weekday())  # Monday 00:00
+    prev_week_start = week_start - timedelta(days=7)
+    elapsed_into_week = now_local - week_start
+    prev_week_elapsed_end = prev_week_start + elapsed_into_week
+    last_week_end = week_start
+    last_week_start = prev_week_start
+    week_before_last_start = last_week_start - timedelta(days=7)
+    month_start = D(y, m, 1)
+    if m == 1:
+        prev_month_start = D(y - 1, 12, 1)
+    else:
+        prev_month_start = D(y, m - 1, 1)
+    elapsed_into_month = now_local - month_start
+    prev_month_elapsed_end = prev_month_start + elapsed_into_month
+    last_month_start = prev_month_start
+    last_month_end = month_start
+    if last_month_start.month == 1:
+        month_before_last_start = D(last_month_start.year - 1, 12, 1)
+    else:
+        month_before_last_start = D(last_month_start.year, last_month_start.month - 1, 1)
+    qm = ((m - 1) // 3) * 3 + 1
+    quarter_start = D(y, qm, 1)
+    if qm == 1:
+        prev_quarter_start = D(y - 1, 10, 1)
+    else:
+        prev_quarter_start = D(y, qm - 3, 1)
+    elapsed_into_quarter = now_local - quarter_start
+    prev_quarter_elapsed_end = prev_quarter_start + elapsed_into_quarter
+    last_quarter_start = prev_quarter_start
+    last_quarter_end = quarter_start
+    if last_quarter_start.month <= 3:
+        quarter_before_last_start = D(last_quarter_start.year - 1, last_quarter_start.month + 9, 1)
+    else:
+        quarter_before_last_start = D(last_quarter_start.year, last_quarter_start.month - 3, 1)
+    year_start = D(y, 1, 1)
+    prev_year_start = D(y - 1, 1, 1)
+    elapsed_into_year = now_local - year_start
+    prev_year_elapsed_end = prev_year_start + elapsed_into_year
+    last_year_start = prev_year_start
+    last_year_end = year_start
+    year_before_last_start = D(y - 2, 1, 1)
+    twelve_mo_start = now_local - timedelta(days=365)
+    twenty_four_mo_start = now_local - timedelta(days=730)
+    epoch = D(1970, 1, 1)
+    return [
+        ("thisWeek",     "This week",        week_start,     now_local,        prev_week_start,           prev_week_elapsed_end),
+        ("lastWeek",     "Last week",        last_week_start, last_week_end,   week_before_last_start,    last_week_start),
+        ("mtd",          "Month to date",    month_start,    now_local,        prev_month_start,          prev_month_elapsed_end),
+        ("lastMonth",    "Last month",       last_month_start, last_month_end, month_before_last_start,   last_month_start),
+        ("qtd",          "Quarter to date",  quarter_start,  now_local,        prev_quarter_start,        prev_quarter_elapsed_end),
+        ("lastQuarter",  "Last quarter",     last_quarter_start, last_quarter_end, quarter_before_last_start, last_quarter_start),
+        ("ytd",          "Year to date",     year_start,     now_local,        prev_year_start,           prev_year_elapsed_end),
+        ("lastYear",     "Last year",        last_year_start, last_year_end,   year_before_last_start,    last_year_start),
+        ("last12mo",     "Last 12 months",   twelve_mo_start, now_local,       twenty_four_mo_start,      twelve_mo_start),
+        ("lifetime",     "Lifetime",         epoch,          now_local,        None,                      None),
+    ]
+
+def _in_window(ts, start, end):
+    """True iff a timezone-aware timestamp falls in [start, end). None safe."""
+    return ts is not None and start is not None and end is not None and start <= ts < end
 
 #─── API Routes ───
 @app.route("/api/tax-rate")
@@ -1242,6 +1355,187 @@ def dashboard_data():
     except Exception as e:
         print(f"DB error (dashboard): {e}")
     return jsonify({"stats": stats, "proposals": proposals, "signatures": signatures, "payments": payments})
+
+@app.route("/api/analytics")
+@require_auth
+def analytics():
+    """Pipeline analytics: status funnel, period buckets (WoW/MoM/QoQ/YoY),
+    monthly sent-vs-signed series, and stale bids. All bucket boundaries in
+    America/Chicago; comparable prior windows use the same elapsed duration
+    for to-date buckets so mid-period comparisons are honest. Degrades to a
+    shaped empty response when DB is missing or down — never 500s."""
+    try:
+        stale_days = max(0, min(365, int(request.args.get("staleDays", 10))))
+    except (ValueError, TypeError):
+        stale_days = 10
+    tz = _business_tz()
+    now_utc = datetime.now(timezone.utc)
+    now_local = now_utc.astimezone(tz)
+    empty = {
+        "ok": False, "timezone": BUSINESS_TZ_NAME,
+        "generatedAt": now_utc.isoformat(),
+        "pipeline": [], "funnel": {}, "staleBids": [], "monthly": [], "periods": [],
+    }
+    if not DATABASE_URL:
+        return jsonify(empty)
+    rows = []
+    payments_rows = []
+    last_engagement = {}
+    try:
+        conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""SELECT id, status, config,
+            config->>'projectName' AS project_name,
+            config->>'clientCompany' AS client_company,
+            created_at, sent_at, viewed_at, signed_at, paid_at
+            FROM proposals""")
+        rows = cur.fetchall()
+        cur.execute("SELECT proposal_id, amount_cents, paid_at FROM payments")
+        payments_rows = cur.fetchall()
+        cur.execute("""SELECT proposal_id, MAX(created_at) AS last_event_at
+            FROM proposal_events WHERE event_type IN ('viewed','overview_viewed')
+            GROUP BY proposal_id""")
+        for r in cur.fetchall():
+            last_engagement[r["proposal_id"]] = r["last_event_at"]
+        conn.close()
+    except Exception as e:
+        print(f"DB error (analytics): {e}")
+        return jsonify(empty)
+
+    def _local(ts):
+        if ts is None:
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts.astimezone(tz)
+
+    pipeline_buckets = {"draft": [0, 0.0], "sent": [0, 0.0], "viewed": [0, 0.0],
+                        "signed": [0, 0.0], "paid": [0, 0.0]}
+    for r in rows:
+        s = r["status"] or "draft"
+        if s not in pipeline_buckets:
+            continue
+        pipeline_buckets[s][0] += 1
+        pipeline_buckets[s][1] += proposal_value(r["config"] or {})
+    pipeline = [{"status": k, "count": v[0], "value": round(v[1], 2)}
+                for k, v in pipeline_buckets.items()]
+
+    sent_total   = sum(1 for r in rows if r["sent_at"])
+    viewed_total = sum(1 for r in rows if r["viewed_at"])
+    signed_total = sum(1 for r in rows if r["signed_at"])
+    paid_total   = sum(1 for r in rows if r["paid_at"])
+    def _safe_div(a, b):
+        return round(a / b, 4) if b else None
+    funnel = {
+        "sentToViewed":  _safe_div(viewed_total, sent_total),
+        "viewedToSigned": _safe_div(signed_total, viewed_total),
+        "signedToPaid":  _safe_div(paid_total, signed_total),
+        "sentToSigned":  _safe_div(signed_total, sent_total),
+    }
+
+    windows = _period_windows(now_local)
+    def _agg(start, end):
+        if start is None or end is None:
+            return {"sentCount": 0, "sentValue": 0.0, "signedCount": 0, "signedValue": 0.0,
+                    "winRate": None, "collectedValue": 0.0}
+        sc = sv = sgc = sgv = 0; sv_total = sgv_total = 0.0
+        for r in rows:
+            cfg = r["config"] or {}
+            val = proposal_value(cfg)
+            sa = _local(r["sent_at"]); ga = _local(r["signed_at"])
+            if _in_window(sa, start, end):
+                sc += 1; sv_total += val
+            if _in_window(ga, start, end):
+                sgc += 1; sgv_total += val
+        collected = 0.0
+        for p in payments_rows:
+            pa = _local(p["paid_at"])
+            if _in_window(pa, start, end):
+                collected += (p["amount_cents"] or 0) / 100.0
+        return {"sentCount": sc, "sentValue": round(sv_total, 2),
+                "signedCount": sgc, "signedValue": round(sgv_total, 2),
+                "winRate": _safe_div(sgc, sc), "collectedValue": round(collected, 2)}
+    def _delta(cur, prev):
+        out = {"sentCount": cur["sentCount"] - prev["sentCount"],
+               "signedCount": cur["signedCount"] - prev["signedCount"]}
+        for k_cur, k_pct in (("sentValue", "sentValuePct"), ("signedValue", "signedValuePct"),
+                             ("collectedValue", "collectedPct")):
+            if prev[k_cur]:
+                out[k_pct] = round((cur[k_cur] - prev[k_cur]) / prev[k_cur], 4)
+            else:
+                out[k_pct] = None
+        return out
+    periods = []
+    for key, label, start, end, prev_start, prev_end in windows:
+        cur_agg = _agg(start, end)
+        prev_agg = _agg(prev_start, prev_end)
+        entry = {"key": key, "label": label,
+                 "start": start.date().isoformat() if start else None,
+                 "end": end.date().isoformat() if end else None,
+                 **cur_agg}
+        if prev_start is not None:
+            entry["prev"] = {"start": prev_start.date().isoformat(),
+                             "end": prev_end.date().isoformat(), **prev_agg}
+            entry["delta"] = _delta(cur_agg, prev_agg)
+        periods.append(entry)
+
+    monthly = []
+    cursor = datetime(now_local.year, now_local.month, 1, tzinfo=tz)
+    months_back = []
+    for _ in range(12):
+        if cursor.month == 1:
+            prev = datetime(cursor.year - 1, 12, 1, tzinfo=tz)
+        else:
+            prev = datetime(cursor.year, cursor.month - 1, 1, tzinfo=tz)
+        months_back.append((prev, cursor))
+        cursor = prev
+    for start, end in reversed(months_back):
+        sc = sgc = 0; sv = sgv = 0.0
+        for r in rows:
+            cfg = r["config"] or {}; val = proposal_value(cfg)
+            if _in_window(_local(r["sent_at"]), start, end):
+                sc += 1; sv += val
+            if _in_window(_local(r["signed_at"]), start, end):
+                sgc += 1; sgv += val
+        monthly.append({"month": start.strftime("%Y-%m"),
+                        "label": start.strftime("%b"),
+                        "sentCount": sc, "sentValue": round(sv, 2),
+                        "signedCount": sgc, "signedValue": round(sgv, 2)})
+
+    stale = []
+    cutoff = now_utc - timedelta(days=stale_days)
+    for r in rows:
+        st = r["status"] or "draft"
+        if st not in ("sent", "viewed"):
+            continue
+        anchor = r["sent_at"] or r["created_at"]
+        if anchor is None:
+            continue
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=timezone.utc)
+        if anchor > cutoff:
+            continue
+        last_act = last_engagement.get(r["id"]) or anchor
+        if last_act.tzinfo is None:
+            last_act = last_act.replace(tzinfo=timezone.utc)
+        days_stale = (now_utc - last_act).days
+        stale.append({
+            "id": r["id"],
+            "projectName": r["project_name"] or "",
+            "clientCompany": r["client_company"] or "",
+            "status": st,
+            "value": proposal_value(r["config"] or {}),
+            "sentAt": r["sent_at"].isoformat() if r["sent_at"] else None,
+            "lastActivityAt": last_act.isoformat(),
+            "daysStale": days_stale,
+        })
+    stale.sort(key=lambda s: s["daysStale"], reverse=True)
+
+    return jsonify({
+        "ok": True, "timezone": BUSINESS_TZ_NAME,
+        "generatedAt": now_utc.isoformat(), "staleDays": stale_days,
+        "pipeline": pipeline, "funnel": funnel,
+        "staleBids": stale, "monthly": monthly, "periods": periods,
+    })
 
 # ─── Admin diagnostics ───
 def _is_session_authed():
