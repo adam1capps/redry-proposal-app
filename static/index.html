@@ -1511,12 +1511,13 @@ function PipelinePanel({analytics}) {
         )}
       </div>
 
-      {/* 12-month trend chart */}
+      {/* Monthly trend chart: 12 complete months + current month to date */}
       <div style={card}>
-        <div style={sectionHead}>Sent vs Signed &mdash; trailing 12 months</div>
+        <div style={sectionHead}>Sent vs Signed &mdash; by month</div>
         <div style={{display:"flex",gap:12,fontSize:11,color:C.gray,marginBottom:6}}>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.navy,marginRight:4,verticalAlign:"middle"}}/>Sent</span>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.green,marginRight:4,verticalAlign:"middle"}}/>Signed</span>
+          <span>* current month, in progress</span>
         </div>
         <MiniBarChart data={monthly}/>
       </div>
@@ -1526,7 +1527,7 @@ function PipelinePanel({analytics}) {
         <div style={sectionHead}>Period comparison</div>
         <p style={{fontSize:11,color:C.gray,margin:"0 0 10px"}}>
           Win rate is signed-in-period over sent-in-period (a flow rate, not a cohort rate). Delta vs the comparable prior window.
-          To-date windows (MTD, QTD, YTD, last 12mo) compare against the same number of elapsed days in the prior period.
+          To-date windows (MTD, QTD, YTD) compare against the same number of elapsed days in the prior period, capped at that period's end.
         </p>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse"}}>

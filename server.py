@@ -440,10 +440,12 @@ def parse_tax_rate(cfg):
 def proposal_value(cfg):
     """Pre-tax bid value in dollars (float) for analytics.
 
-    Mirrors the standard (no-adjustment) option in the SPA's calcOptions /
-    calcFixedOptions and the send-email math:
+    Mirrors the send-email "Investment" math (full contract value):
       performance: wetSF*ratePSF + (scanCost*numScans unless waiveScans)
       fixed:       numVents*ventRate + installFee   (leaseTerm is display-only)
+    NOTE: the SPA's calcOptions payment-option totals EXCLUDE scan costs (a
+    pre-existing divergence between the option totals and the emailed
+    Investment table); analytics deliberately uses the full-contract lens.
     Numeric defaults are 0 (NOT the SPA's display defaults) so junk/legacy
     rows don't fabricate phantom revenue. hidePricing rows are $0 — they
     are reframed as complimentary. Pre-tax: tax is pass-through.
@@ -472,11 +474,15 @@ def _business_tz():
         return timezone.utc
 
 def _period_windows(now_local):
-    """Return {key: (start, end, prev_start, prev_end, label)} in business-local
-    time. Prior windows for MTD/QTD/YTD/last12mo use the SAME elapsed duration
-    as the current window so mid-period comparisons are honest (true MoM/QoQ/
-    YoY). lastWeek/lastMonth/lastQuarter/lastYear are the previous complete
-    period vs the one before that.
+    """Return [(key, label, start, end, prev_start, prev_end)] in business-local
+    time. Prior windows for to-date buckets (MTD/QTD/YTD) use the SAME elapsed
+    duration as the current window so mid-period comparisons are honest (true
+    MoM/QoQ/YoY) — CLAMPED to the prior period's end, because the prior period
+    can be shorter than the elapsed time (e.g. on Mar 30, Feb 1 + 29 days
+    would spill into March and double-count current-month bids in the
+    comparison window). lastWeek/lastMonth/lastQuarter/lastYear are the
+    previous complete period vs the one before that. Weeks need no clamp:
+    elapsed-into-week is always < 7 days.
     """
     tz = now_local.tzinfo
     def D(y, m, d, h=0, mi=0):
@@ -495,7 +501,7 @@ def _period_windows(now_local):
     else:
         prev_month_start = D(y, m - 1, 1)
     elapsed_into_month = now_local - month_start
-    prev_month_elapsed_end = prev_month_start + elapsed_into_month
+    prev_month_elapsed_end = min(prev_month_start + elapsed_into_month, month_start)
     last_month_start = prev_month_start
     last_month_end = month_start
     if last_month_start.month == 1:
@@ -509,7 +515,7 @@ def _period_windows(now_local):
     else:
         prev_quarter_start = D(y, qm - 3, 1)
     elapsed_into_quarter = now_local - quarter_start
-    prev_quarter_elapsed_end = prev_quarter_start + elapsed_into_quarter
+    prev_quarter_elapsed_end = min(prev_quarter_start + elapsed_into_quarter, quarter_start)
     last_quarter_start = prev_quarter_start
     last_quarter_end = quarter_start
     if last_quarter_start.month <= 3:
@@ -519,7 +525,7 @@ def _period_windows(now_local):
     year_start = D(y, 1, 1)
     prev_year_start = D(y - 1, 1, 1)
     elapsed_into_year = now_local - year_start
-    prev_year_elapsed_end = prev_year_start + elapsed_into_year
+    prev_year_elapsed_end = min(prev_year_start + elapsed_into_year, year_start)
     last_year_start = prev_year_start
     last_year_end = year_start
     year_before_last_start = D(y - 2, 1, 1)
@@ -542,6 +548,58 @@ def _period_windows(now_local):
 def _in_window(ts, start, end):
     """True iff a timezone-aware timestamp falls in [start, end). None safe."""
     return ts is not None and start is not None and end is not None and start <= ts < end
+
+def _compute_stale_bids(rows, last_engagement, stale_days, now_utc):
+    """Bids that are out the door (sent/viewed) with NO engagement in the last
+    stale_days. The filter is on LAST ACTIVITY, not send date — a proposal
+    sent a month ago but opened by the client yesterday is not stale, and
+    must not trigger a follow-up nudge. daysStale is measured from the same
+    last-activity timestamp the filter uses, so the displayed number can
+    never contradict the list's inclusion criterion.
+    """
+    cutoff = now_utc - timedelta(days=stale_days)
+    stale = []
+    for r in rows:
+        st = r["status"] or "draft"
+        if st not in ("sent", "viewed"):
+            continue
+        anchor = r["sent_at"] or r["created_at"]
+        if anchor is None:
+            continue
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=timezone.utc)
+        last_act = last_engagement.get(r["id"]) or anchor
+        if last_act.tzinfo is None:
+            last_act = last_act.replace(tzinfo=timezone.utc)
+        if last_act > cutoff:
+            continue
+        stale.append({
+            "id": r["id"],
+            "projectName": r["project_name"] or "",
+            "clientCompany": r["client_company"] or "",
+            "status": st,
+            "value": proposal_value(r["config"] or {}),
+            "sentAt": r["sent_at"].isoformat() if r["sent_at"] else None,
+            "lastActivityAt": last_act.isoformat(),
+            "daysStale": (now_utc - last_act).days,
+        })
+    stale.sort(key=lambda s: s["daysStale"], reverse=True)
+    return stale
+
+def _request_is_admin():
+    """True when the current request carries valid admin credentials. Used to
+    keep the owner's own proposal opens (Past Proposals loads, link checks)
+    out of the engagement metrics — those would otherwise log 'viewed'
+    events and reset stale-bid timers, masquerading as client activity.
+    Deliberately returns False when TEAM_PASSWORD is unset: with auth
+    disabled we can't tell the owner from a client, and silently dropping
+    ALL view logging would be worse than counting self-views.
+    """
+    if not TEAM_PASSWORD:
+        return False
+    token = request.headers.get("X-Auth-Token") or request.cookies.get("auth_token") or ""
+    stored = session.get("auth_token", "")
+    return bool(token and stored and hmac.compare_digest(token, stored))
 
 #─── API Routes ───
 @app.route("/api/tax-rate")
@@ -1010,8 +1068,12 @@ def get_proposal_config(pid):
     if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
     cfg = load_proposal_config(pid)
     if not cfg: return jsonify({"error": "Not found"}), 404
-    db_update_status_if_earlier(pid, "viewed", "viewed_at")
-    db_log_event(pid, "viewed", {"ip": request.headers.get("X-Forwarded-For", request.remote_addr), "ua": request.headers.get("User-Agent", "")[:200]})
+    # Engagement metrics mean CLIENT engagement. The owner's own opens (Past
+    # Proposals loads in the builder send the admin token) must not promote
+    # status to "viewed", bump view counts, or reset stale-bid timers.
+    if not _request_is_admin():
+        db_update_status_if_earlier(pid, "viewed", "viewed_at")
+        db_log_event(pid, "viewed", {"ip": request.headers.get("X-Forwarded-For", request.remote_addr), "ua": request.headers.get("User-Agent", "")[:200]})
     return jsonify(cfg)
 
 @app.route("/api/proposal/<pid>/pdf")
@@ -1450,17 +1512,23 @@ def analytics():
     pipeline = [{"status": k, "count": v[0], "value": round(v[1], 2)}
                 for k, v in pipeline_buckets.items()]
 
-    sent_total   = sum(1 for r in rows if r["sent_at"])
-    viewed_total = sum(1 for r in rows if r["viewed_at"])
-    signed_total = sum(1 for r in rows if r["signed_at"])
-    paid_total   = sum(1 for r in rows if r["paid_at"])
+    # Conditional rates (numerator is a subset of the denominator, so each is
+    # bounded at 100%). A plain viewed/sent ratio can exceed 1.0 because the
+    # copy-link flow sets viewed_at on proposals that were never emailed.
+    sent_total    = sum(1 for r in rows if r["sent_at"])
+    viewed_total  = sum(1 for r in rows if r["viewed_at"])
+    signed_total  = sum(1 for r in rows if r["signed_at"])
+    sent_viewed   = sum(1 for r in rows if r["sent_at"] and r["viewed_at"])
+    viewed_signed = sum(1 for r in rows if r["viewed_at"] and r["signed_at"])
+    signed_paid   = sum(1 for r in rows if r["signed_at"] and r["paid_at"])
+    sent_signed   = sum(1 for r in rows if r["sent_at"] and r["signed_at"])
     def _safe_div(a, b):
         return round(a / b, 4) if b else None
     funnel = {
-        "sentToViewed":  _safe_div(viewed_total, sent_total),
-        "viewedToSigned": _safe_div(signed_total, viewed_total),
-        "signedToPaid":  _safe_div(paid_total, signed_total),
-        "sentToSigned":  _safe_div(signed_total, sent_total),
+        "sentToViewed":  _safe_div(sent_viewed, sent_total),
+        "viewedToSigned": _safe_div(viewed_signed, viewed_total),
+        "signedToPaid":  _safe_div(signed_paid, signed_total),
+        "sentToSigned":  _safe_div(sent_signed, sent_total),
     }
 
     windows = _period_windows(now_local)
@@ -1468,7 +1536,7 @@ def analytics():
         if start is None or end is None:
             return {"sentCount": 0, "sentValue": 0.0, "signedCount": 0, "signedValue": 0.0,
                     "winRate": None, "collectedValue": 0.0}
-        sc = sv = sgc = sgv = 0; sv_total = sgv_total = 0.0
+        sc = sgc = 0; sv_total = sgv_total = 0.0
         for r in rows:
             cfg = r["config"] or {}
             val = proposal_value(cfg)
@@ -1495,31 +1563,39 @@ def analytics():
             else:
                 out[k_pct] = None
         return out
+    # Period ends are exclusive bounds internally; display them as the last
+    # day INSIDE the window ("Last month: May 1 – May 31", not "– Jun 1").
+    def _disp_date(dt):
+        return (dt - timedelta(microseconds=1)).date().isoformat()
     periods = []
     for key, label, start, end, prev_start, prev_end in windows:
         cur_agg = _agg(start, end)
         prev_agg = _agg(prev_start, prev_end)
         entry = {"key": key, "label": label,
                  "start": start.date().isoformat() if start else None,
-                 "end": end.date().isoformat() if end else None,
+                 "end": _disp_date(end) if end else None,
                  **cur_agg}
         if prev_start is not None:
             entry["prev"] = {"start": prev_start.date().isoformat(),
-                             "end": prev_end.date().isoformat(), **prev_agg}
+                             "end": _disp_date(prev_end), **prev_agg}
             entry["delta"] = _delta(cur_agg, prev_agg)
         periods.append(entry)
 
+    # 12 complete months + the current month in progress (marked with * so
+    # the chart's rightmost bar isn't mistaken for a full month).
     monthly = []
     cursor = datetime(now_local.year, now_local.month, 1, tzinfo=tz)
-    months_back = []
+    month_windows = []
     for _ in range(12):
         if cursor.month == 1:
             prev = datetime(cursor.year - 1, 12, 1, tzinfo=tz)
         else:
             prev = datetime(cursor.year, cursor.month - 1, 1, tzinfo=tz)
-        months_back.append((prev, cursor))
+        month_windows.append((prev, cursor, False))
         cursor = prev
-    for start, end in reversed(months_back):
+    month_windows.reverse()
+    month_windows.append((datetime(now_local.year, now_local.month, 1, tzinfo=tz), now_local, True))
+    for start, end, in_progress in month_windows:
         sc = sgc = 0; sv = sgv = 0.0
         for r in rows:
             cfg = r["config"] or {}; val = proposal_value(cfg)
@@ -1528,38 +1604,12 @@ def analytics():
             if _in_window(_local(r["signed_at"]), start, end):
                 sgc += 1; sgv += val
         monthly.append({"month": start.strftime("%Y-%m"),
-                        "label": start.strftime("%b"),
+                        "label": start.strftime("%b") + ("*" if in_progress else ""),
+                        "inProgress": in_progress,
                         "sentCount": sc, "sentValue": round(sv, 2),
                         "signedCount": sgc, "signedValue": round(sgv, 2)})
 
-    stale = []
-    cutoff = now_utc - timedelta(days=stale_days)
-    for r in rows:
-        st = r["status"] or "draft"
-        if st not in ("sent", "viewed"):
-            continue
-        anchor = r["sent_at"] or r["created_at"]
-        if anchor is None:
-            continue
-        if anchor.tzinfo is None:
-            anchor = anchor.replace(tzinfo=timezone.utc)
-        if anchor > cutoff:
-            continue
-        last_act = last_engagement.get(r["id"]) or anchor
-        if last_act.tzinfo is None:
-            last_act = last_act.replace(tzinfo=timezone.utc)
-        days_stale = (now_utc - last_act).days
-        stale.append({
-            "id": r["id"],
-            "projectName": r["project_name"] or "",
-            "clientCompany": r["client_company"] or "",
-            "status": st,
-            "value": proposal_value(r["config"] or {}),
-            "sentAt": r["sent_at"].isoformat() if r["sent_at"] else None,
-            "lastActivityAt": last_act.isoformat(),
-            "daysStale": days_stale,
-        })
-    stale.sort(key=lambda s: s["daysStale"], reverse=True)
+    stale = _compute_stale_bids(rows, last_engagement, stale_days, now_utc)
 
     return jsonify({
         "ok": True, "timezone": BUSINESS_TZ_NAME,

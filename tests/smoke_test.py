@@ -130,6 +130,48 @@ if r.status_code == 200:
         check(f"dashboard has '{key}'", key in d, f"missing {key}")
     check("dashboard proposals is a list", isinstance(d.get("proposals"), list))
 
+# 14a. _period_windows: prev "same-elapsed" windows must NEVER spill into the
+#      current period (double counting). Mar 30 is the canonical trap: Feb has
+#      28 days, so Feb 1 + 29.6 elapsed days would reach into March.
+from datetime import datetime as _dt, timezone as _tz
+_btz = server._business_tz()
+for probe in (_dt(2026, 3, 30, 15, 0, tzinfo=_btz),    # Feb shorter than elapsed
+              _dt(2026, 5, 31, 23, 0, tzinfo=_btz),    # Apr shorter than May
+              _dt(2026, 9, 30, 18, 0, tzinfo=_btz),    # Q3 (92d) vs Q2 (91d)
+              _dt(2024, 12, 31, 23, 0, tzinfo=_btz)):  # leap-year YTD
+    for key, label, start, end, ps, pe in server._period_windows(probe):
+        if ps is None:
+            continue
+        check(f"window '{key}' prev does not overlap current ({probe.date()})",
+              pe <= start, f"prev_end={pe} > start={start}")
+        check(f"window '{key}' prev is non-empty ({probe.date()})",
+              ps < pe, f"prev_start={ps} >= prev_end={pe}")
+
+# 14b. Stale bids: filter is on LAST ACTIVITY, not send date.
+_now = _dt(2026, 6, 10, 12, 0, tzinfo=_tz.utc)
+def _row(pid, status, sent_days_ago):
+    from datetime import timedelta as _td
+    return {"id": pid, "status": status, "config": {},
+            "project_name": pid, "client_company": "",
+            "sent_at": _now - _td(days=sent_days_ago), "created_at": _now - _td(days=sent_days_ago)}
+from datetime import timedelta as _td
+_rows = [
+    _row("oldnoview", "sent", 30),                 # stale: 30d, never engaged
+    _row("oldviewedyday", "viewed", 30),           # NOT stale: viewed yesterday
+    _row("freshsent", "sent", 2),                  # NOT stale: only 2d old
+    _row("signedone", "signed", 40),               # excluded: already signed
+]
+_engagement = {"oldviewedyday": _now - _td(days=1)}
+_stale = server._compute_stale_bids(_rows, _engagement, 10, _now)
+_ids = [s["id"] for s in _stale]
+check("stale includes never-engaged old bid", _ids == ["oldnoview"], f"got {_ids}")
+check("stale daysStale measured from last activity", _stale[0]["daysStale"] == 30, f"got {_stale[0]['daysStale']}")
+
+# 14c. _request_is_admin is False when auth is disabled (otherwise no view
+#      would ever be logged on no-password deployments).
+with server.app.test_request_context("/api/proposal/abc123abc123"):
+    check("_request_is_admin False without TEAM_PASSWORD", server._request_is_admin() is False)
+
 # 14. Events endpoint: malformed id rejected, well-formed unknown returns []
 r = client.get("/api/proposal/NOT-A-VALID-ID/events")
 check("GET /api/proposal/<bad>/events -> 400", r.status_code == 400, f"got {r.status_code}")
