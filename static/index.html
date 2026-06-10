@@ -1594,11 +1594,76 @@ function PipelinePanel({analytics}) {
 }
 
 // ─── DASHBOARD ───
+function EventTimeline({pid}) {
+  const [events, setEvents] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let cancel = false;
+    authFetch(`${API}/api/proposal/${pid}/events`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => { if(!cancel) setEvents(Array.isArray(d) ? d : []); })
+      .catch(() => { if(!cancel) setErr(true); });
+    return () => { cancel = true; };
+  }, [pid]);
+  // Colors by event type. Unknown types render generically (forward-
+  // compatible: PR 3 will add overview_viewed without touching this).
+  const dotColor = t => ({
+    created: "#94a3b8",
+    sent: "#3b82f6",
+    viewed: "#8b5cf6",
+    overview_viewed: C.orange,
+    signed: C.green,
+    payment: C.green,
+    approval_requested: C.navy,
+  }[t] || C.gray);
+  const labelFor = t => ({
+    created: "Created",
+    sent: "Sent",
+    viewed: "Viewed",
+    overview_viewed: "Overview viewed",
+    signed: "Signed",
+    payment: "Payment received",
+    approval_requested: "Sent for approval",
+  }[t] || t);
+  const detailLine = e => {
+    const d = e.details || {};
+    if(e.type === "sent" || e.type === "approval_requested") return d.to ? `to ${d.to}` : "";
+    if(e.type === "viewed" || e.type === "overview_viewed") return d.ip ? `${d.ip}` : "";
+    if(e.type === "payment") {
+      const amt = d.amountCents ? `$${(d.amountCents/100).toLocaleString("en-US",{minimumFractionDigits:2})}` : "";
+      const meth = d.method ? ` via ${d.method.toUpperCase()}` : "";
+      return `${amt}${meth}`.trim();
+    }
+    if(e.type === "signed") return d.signerName ? `by ${d.signerName}` : "";
+    return "";
+  };
+  const fmt = d => d ? new Date(d).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}) : "";
+  if(err) return <div style={{color:C.gray,fontSize:12,padding:8}}>Could not load event history.</div>;
+  if(events === null) return <div style={{color:C.gray,fontSize:12,padding:8}}>Loading activity…</div>;
+  if(events.length === 0) return <div style={{color:C.gray,fontSize:12,padding:8}}>No activity logged yet.</div>;
+  return (
+    <div style={{padding:"8px 4px"}}>
+      <div style={{fontSize:11,fontWeight:700,color:C.gray,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Activity</div>
+      {events.map((e, i) => (
+        <div key={i} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"6px 0",borderBottom:i<events.length-1?`1px solid ${C.border}`:"none"}}>
+          <div style={{width:10,height:10,borderRadius:"50%",background:dotColor(e.type),marginTop:5,flexShrink:0}}/>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,color:C.navy,fontWeight:600}}>{labelFor(e.type)}</div>
+            {detailLine(e) && <div style={{fontSize:12,color:C.gray,marginTop:1}}>{detailLine(e)}</div>}
+          </div>
+          <div style={{fontSize:11,color:C.gray,whiteSpace:"nowrap"}}>{fmt(e.at)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Dashboard({onBack}) {
   const [data, setData] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("pipeline");
+  const [expandedId, setExpandedId] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -1668,28 +1733,49 @@ function Dashboard({onBack}) {
 
     {/* Proposals table */}
     {tab==="proposals" && <div style={{background:"#fff",borderRadius:10,border:`1px solid ${C.border}`,overflowX:"auto"}}>
+      <div style={{padding:"8px 12px",fontSize:11,color:C.gray,borderBottom:`1px solid ${C.border}`}}>Click a row to see the full activity timeline.</div>
       <table style={{width:"100%",borderCollapse:"collapse"}}>
         <thead><tr>
           <th style={thStyle}>Project</th><th style={thStyle}>Company</th><th style={thStyle}>Contact</th>
-          <th style={thStyle}>Email</th><th style={thStyle}>Status</th><th style={thStyle}>Created</th>
+          <th style={thStyle}>Email</th><th style={thStyle}>Status</th>
+          <th style={thStyle}>Views</th><th style={thStyle}>Last Viewed</th>
+          <th style={thStyle}>Created</th>
           <th style={thStyle}>Sent</th><th style={thStyle}>Viewed</th><th style={thStyle}>Signed</th><th style={thStyle}>Paid</th>
         </tr></thead>
         <tbody>
-          {proposals.length===0 && <tr><td colSpan={10} style={{...tdStyle,textAlign:"center",color:C.gray,padding:30}}>No proposals yet.</td></tr>}
-          {proposals.map(p=>(
-            <tr key={p.id} style={{transition:"background 0.1s"}} onMouseEnter={e=>e.currentTarget.style.background="#f8f9fb"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <td style={tdStyle}><span style={{fontWeight:600,color:C.navy}}>{p.projectName||"Untitled"}</span><br/><span style={{fontSize:10,color:C.gray}}>{p.id.slice(0,12)}...</span></td>
-              <td style={tdStyle}>{p.clientCompany||"—"}</td>
-              <td style={tdStyle}>{p.clientContact||"—"}</td>
-              <td style={tdStyle}>{p.clientEmail||"—"}</td>
-              <td style={tdStyle}><span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,fontSize:11,fontWeight:700,color:"#fff",background:statusColor(p.status)}}>{statusLabel(p.status)}</span></td>
-              <td style={tdStyle}>{fmtDate(p.createdAt)}</td>
-              <td style={tdStyle}>{fmtDate(p.sentAt)}</td>
-              <td style={tdStyle}>{fmtDate(p.viewedAt)}</td>
-              <td style={tdStyle}>{fmtDate(p.signedAt)}</td>
-              <td style={tdStyle}>{fmtDate(p.paidAt)}</td>
-            </tr>
-          ))}
+          {proposals.length===0 && <tr><td colSpan={12} style={{...tdStyle,textAlign:"center",color:C.gray,padding:30}}>No proposals yet.</td></tr>}
+          {proposals.map(p=>{
+            const isOpen = expandedId === p.id;
+            return (<React.Fragment key={p.id}>
+              <tr style={{transition:"background 0.1s",cursor:"pointer",background:isOpen?"#f8f9fb":"transparent"}}
+                  onClick={()=>setExpandedId(isOpen ? null : p.id)}
+                  onMouseEnter={e=>{if(!isOpen) e.currentTarget.style.background="#f8f9fb"}}
+                  onMouseLeave={e=>{if(!isOpen) e.currentTarget.style.background="transparent"}}>
+                <td style={tdStyle}>
+                  <span style={{color:C.gray,marginRight:4,display:"inline-block",width:10}}>{isOpen ? "▾" : "▸"}</span>
+                  <span style={{fontWeight:600,color:C.navy}}>{p.projectName||"Untitled"}</span><br/>
+                  <span style={{fontSize:10,color:C.gray,marginLeft:14}}>{p.id.slice(0,12)}...</span>
+                </td>
+                <td style={tdStyle}>{p.clientCompany||"—"}</td>
+                <td style={tdStyle}>{p.clientContact||"—"}</td>
+                <td style={tdStyle}>{p.clientEmail||"—"}</td>
+                <td style={tdStyle}><span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,fontSize:11,fontWeight:700,color:"#fff",background:statusColor(p.status)}}>{statusLabel(p.status)}</span></td>
+                <td style={tdStyle}>
+                  <span style={{fontWeight:p.viewCount>0?700:400,color:p.viewCount>0?C.navy:C.gray}}>{p.viewCount||0}</span>
+                  {p.overviewViews>0 && <span style={{fontSize:10,color:C.orange,marginLeft:6}}>+{p.overviewViews} overview</span>}
+                </td>
+                <td style={tdStyle}>{p.lastViewedAt ? fmtDate(p.lastViewedAt) : <span style={{color:C.gray}}>—</span>}</td>
+                <td style={tdStyle}>{fmtDate(p.createdAt)}</td>
+                <td style={tdStyle}>{fmtDate(p.sentAt)}</td>
+                <td style={tdStyle}>{fmtDate(p.viewedAt)}</td>
+                <td style={tdStyle}>{fmtDate(p.signedAt)}</td>
+                <td style={tdStyle}>{fmtDate(p.paidAt)}</td>
+              </tr>
+              {isOpen && <tr><td colSpan={12} style={{background:"#f8f9fb",padding:"12px 18px",borderBottom:`1px solid ${C.border}`}}>
+                <EventTimeline pid={p.id}/>
+              </td></tr>}
+            </React.Fragment>);
+          })}
         </tbody>
       </table>
     </div>}
@@ -1807,6 +1893,7 @@ function ProposalSearch({onLoad, onBack}) {
             {statusLabel(p.status)}
           </div>
           <div style={{fontSize:11,color:C.gray}}>{fmtDate(p.createdAt)}</div>
+          {p.viewCount > 0 && <div style={{fontSize:10,color:C.gray,marginTop:2}}>{p.viewCount} view{p.viewCount===1?"":"s"}</div>}
         </div>
         <div style={{color:C.gray,fontSize:16,flexShrink:0}}>&rsaquo;</div>
       </div>

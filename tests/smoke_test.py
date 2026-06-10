@@ -121,6 +121,23 @@ if r.status_code == 200:
     check("analytics ok=False when no DB", a.get("ok") is False, f"got {a.get('ok')}")
     check("analytics periods is a list", isinstance(a.get("periods"), list))
 
+# 13. Dashboard endpoint shape (engagement fields don't break the no-DB path).
+r = client.get("/api/dashboard")
+check("GET /api/dashboard -> 200", r.status_code == 200, f"got {r.status_code}")
+if r.status_code == 200:
+    d = r.get_json() or {}
+    for key in ("stats", "proposals", "signatures", "payments"):
+        check(f"dashboard has '{key}'", key in d, f"missing {key}")
+    check("dashboard proposals is a list", isinstance(d.get("proposals"), list))
+
+# 14. Events endpoint: malformed id rejected, well-formed unknown returns []
+r = client.get("/api/proposal/NOT-A-VALID-ID/events")
+check("GET /api/proposal/<bad>/events -> 400", r.status_code == 400, f"got {r.status_code}")
+r = client.get("/api/proposal/abcdef123456/events")
+check("GET /api/proposal/<unknown>/events -> 200", r.status_code == 200, f"got {r.status_code}")
+if r.status_code == 200:
+    check("events without DB is empty list", r.get_json() == [], f"got {r.data!r}")
+
 print()
 if failures:
     print(f"{len(failures)} smoke check(s) FAILED: {', '.join(failures)}")

@@ -151,6 +151,11 @@ def init_db():
                 event_type TEXT, details JSONB, created_at TIMESTAMPTZ DEFAULT NOW())""")
             _exec_ignore_dup(cur, """CREATE UNIQUE INDEX IF NOT EXISTS payments_stripe_session_unique
                 ON payments(stripe_session_id) WHERE stripe_session_id IS NOT NULL AND stripe_session_id != ''""")
+            # Supports the engagement aggregates that feed /api/proposals and
+            # /api/dashboard view counts. Without it, every dashboard load
+            # full-scans proposal_events.
+            _exec_ignore_dup(cur, """CREATE INDEX IF NOT EXISTS proposal_events_pid_type
+                ON proposal_events(proposal_id, event_type)""")
             conn.close()
             _INIT_DB_OK = True
             _INIT_DB_LAST_ERROR = None
@@ -1271,7 +1276,17 @@ def list_proposals():
             conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute("""SELECT p.id, p.config->>'projectName' as project_name, p.config->>'clientCompany' as client_company,
                 p.config->>'clientEmail' as client_email, p.config->>'clientContact' as client_contact,
-                p.status, p.created_at, p.sent_at, p.viewed_at, p.signed_at, p.paid_at FROM proposals p ORDER BY p.created_at DESC""")
+                p.status, p.created_at, p.sent_at, p.viewed_at, p.signed_at, p.paid_at,
+                COALESCE(v.view_count, 0) AS view_count, v.last_viewed_at,
+                COALESCE(o.overview_view_count, 0) AS overview_view_count
+                FROM proposals p
+                LEFT JOIN (SELECT proposal_id, COUNT(*) AS view_count, MAX(created_at) AS last_viewed_at
+                           FROM proposal_events WHERE event_type='viewed' GROUP BY proposal_id) v
+                       ON v.proposal_id = p.id
+                LEFT JOIN (SELECT proposal_id, COUNT(*) AS overview_view_count
+                           FROM proposal_events WHERE event_type='overview_viewed' GROUP BY proposal_id) o
+                       ON o.proposal_id = p.id
+                ORDER BY p.created_at DESC""")
             for row in cur.fetchall():
                 proposals.append({"id": row["id"], "projectName": row["project_name"] or "", "clientCompany": row["client_company"] or "",
                     "clientEmail": row["client_email"] or "", "clientContact": row["client_contact"] or "",
@@ -1280,7 +1295,10 @@ def list_proposals():
                     "sentAt": row["sent_at"].isoformat() if row["sent_at"] else None,
                     "viewedAt": row["viewed_at"].isoformat() if row["viewed_at"] else None,
                     "signedAt": row["signed_at"].isoformat() if row["signed_at"] else None,
-                    "paidAt": row["paid_at"].isoformat() if row["paid_at"] else None})
+                    "paidAt": row["paid_at"].isoformat() if row["paid_at"] else None,
+                    "viewCount": row["view_count"] or 0,
+                    "lastViewedAt": row["last_viewed_at"].isoformat() if row["last_viewed_at"] else None,
+                    "overviewViews": row["overview_view_count"] or 0})
             conn.close(); return jsonify(proposals)
         except Exception as e: print(f"DB error (list_proposals): {e}")
     for f in os.listdir(PROPOSALS_DIR):
@@ -1318,13 +1336,26 @@ def dashboard_data():
         # Proposals
         cur.execute("""SELECT p.id, p.config->>'projectName' as project_name, p.config->>'clientCompany' as client_company,
             p.config->>'clientContact' as client_contact, p.config->>'clientEmail' as client_email,
-            p.status, p.created_at, p.sent_at, p.viewed_at, p.signed_at, p.paid_at FROM proposals p ORDER BY p.created_at DESC""")
+            p.status, p.created_at, p.sent_at, p.viewed_at, p.signed_at, p.paid_at,
+            COALESCE(v.view_count, 0) AS view_count, v.last_viewed_at,
+            COALESCE(o.overview_view_count, 0) AS overview_view_count
+            FROM proposals p
+            LEFT JOIN (SELECT proposal_id, COUNT(*) AS view_count, MAX(created_at) AS last_viewed_at
+                       FROM proposal_events WHERE event_type='viewed' GROUP BY proposal_id) v
+                   ON v.proposal_id = p.id
+            LEFT JOIN (SELECT proposal_id, COUNT(*) AS overview_view_count
+                       FROM proposal_events WHERE event_type='overview_viewed' GROUP BY proposal_id) o
+                   ON o.proposal_id = p.id
+            ORDER BY p.created_at DESC""")
         for row in cur.fetchall():
             proposals.append({k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in {
                 "id": row["id"], "projectName": row["project_name"] or "", "clientCompany": row["client_company"] or "",
                 "clientContact": row["client_contact"] or "", "clientEmail": row["client_email"] or "",
                 "status": row["status"] or "draft", "createdAt": row["created_at"], "sentAt": row["sent_at"],
-                "viewedAt": row["viewed_at"], "signedAt": row["signed_at"], "paidAt": row["paid_at"]
+                "viewedAt": row["viewed_at"], "signedAt": row["signed_at"], "paidAt": row["paid_at"],
+                "viewCount": row["view_count"] or 0,
+                "lastViewedAt": row["last_viewed_at"],
+                "overviewViews": row["overview_view_count"] or 0,
             }.items()})
         stats["totalProposals"] = len(proposals)
         for p in proposals:
