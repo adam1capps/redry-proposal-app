@@ -1013,7 +1013,6 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   const [selectedOption,setSelectedOption]=useState(null);
   const [termsOk,setTermsOk]=useState(false);
   const [payingWith,setPayingWith]=useState("card");
-  const [checkoutLoading,setCheckoutLoading]=useState(false);
   const savedTaxRate = parseFloat(form.taxRate) || 0;
   const [taxRate,setTaxRate]=useState(savedTaxRate);
   const [paymentSuccess,setPaymentSuccess]=useState(false);
@@ -1068,21 +1067,10 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
     if(singleOptionIndex !== null && selectedOption === null) setSelectedOption(singleOptionIndex);
   },[singleOptionIndex]);
 
-  const doCheckout = async(optIndex, pmtIndex) => {
-    const opt = options[optIndex]; const pmt = opt.payments[pmtIndex];
-    const useAch = payingWith === "ach";
-    const amount = useAch ? pmt.achAmount : pmt.amount;
-    setCheckoutLoading(true);
-    try {
-      const r = await fetch(`${API}/api/create-checkout`, {method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({proposalId, option:optIndex+1, paymentNumber:pmtIndex+1, amountCents:Math.round(amount*100),
-          description:`ReDry ${pmt.label} - ${form.projectName}`, paymentMethod:useAch?"ach":"card",
-          clientCompany:form.clientCompany, projectName:form.projectName})});
-      const d = await r.json();
-      if(d.url) window.location.href = d.url; else alert("Error: " + (d.error||"Unknown"));
-    } catch(e) { alert("Payment error. Please try again."); }
-    setCheckoutLoading(false);
-  };
+  // No checkout is initiated from the proposal. The client chooses a pricing
+  // option and a preferred payment method; ReDry invoices separately. The
+  // ?payment=success handler above is retained only to record a payment that
+  // was collected elsewhere, never to start one.
 
   const doAccept = async()=>{
     if(!sigName||!sigDate||!termsOk||(selectedOption===null && !form.hidePricing))return;
@@ -1129,13 +1117,6 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
         <div style={{marginTop:16,fontSize:12,color:C.gray}}>
           <a href="/warranty" target="_blank" rel="noopener" style={{color:C.gray,textDecoration:"underline"}}>View the Limited Material Warranty Agreement</a>
         </div>
-        {selectedOption!==null && !form.hidePricing && <div style={{marginTop:20,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
-          <div style={{fontSize:12,color:C.gray,marginBottom:8}}>Prefer to pay online now instead of waiting for the invoice?</div>
-          <button onClick={()=>doCheckout(selectedOption, 0)} disabled={checkoutLoading}
-            style={{padding:"9px 20px",border:`1px solid ${C.border}`,borderRadius:6,background:"#fff",color:C.navy,fontSize:13,fontWeight:600,cursor:checkoutLoading?"wait":"pointer"}}>
-            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? options[selectedOption].payments[0].achAmount : options[selectedOption].payments[0].amount)} now`}
-          </button>
-        </div>}
       </div>
     </div>
   );
@@ -1208,7 +1189,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
         <B html="Roof membrane repair, replacement, or coating (by others)."/>
         <B html="Structural deck repair or modification."/>
         <B html={`Any work beyond the ${escHtml(form.projectSection)||"designated"} boundary identified on the Placement Map.`}/>
-        {!form.hidePricing && SH(3,"Pricing and Payment")}
+        {!form.hidePricing && SH(3,"Pricing Options")}
         {form.hidePricing && SH(3,"Project Details")}
         {!form.hidePricing && <P>The vent system lease is based on <strong>{fmtN(wetSF)} square feet</strong> of identified wet insulation at <strong>{fmtC(rate)} per square foot</strong>.</P>}
         {form.hidePricing && <P>This proposal covers the ReDry Vent System for <strong>{fmtN(wetSF)} square feet</strong> of identified wet insulation. The vent system is provided at <strong>no charge</strong> as a complimentary service.</P>}
@@ -1222,7 +1203,8 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           {visibleOptions.length>0 && visibleOptions[0].opt.achEligible && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>ACH Savings:</span> Save $100 when paying via bank transfer</div>}
         </div>}
 
-        {!form.hidePricing && visibleOptions.length > 1 && <P>Select a payment option below:</P>}
+        {!form.hidePricing && visibleOptions.length > 1 && <P>Review the options below and select the one you’d like. Nothing is charged here — ReDry will invoice you separately for the option you choose.</P>}
+        {!form.hidePricing && visibleOptions.length === 1 && <P>Nothing is charged here — ReDry will invoice you separately.</P>}
 
         {!form.hidePricing && <div style={{display:"flex",gap:16,marginTop:16,flexWrap:"wrap"}}>
           {visibleOptions.map(({opt,oi})=>{
@@ -1330,7 +1312,6 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
   const [accepted,setAccepted]=useState(false), [submitting,setSubmitting]=useState(false);
   const [termsOk,setTermsOk]=useState(false);
   const [payingWith,setPayingWith]=useState("card");
-  const [checkoutLoading,setCheckoutLoading]=useState(false);
   const savedTaxRate = parseFloat(form.taxRate) || 0;
   const [taxRate,setTaxRate]=useState(savedTaxRate);
   const [paymentSuccess,setPaymentSuccess]=useState(false);
@@ -1374,21 +1355,9 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
   const options = calcFixedOptions(form, taxRate);
   const opt = options[0];
 
-  const doCheckout = async() => {
-    const pmt = opt.payments[0];
-    const useAch = payingWith === "ach";
-    const amount = useAch ? pmt.achAmount : pmt.amount;
-    setCheckoutLoading(true);
-    try {
-      const r = await fetch(`${API}/api/create-checkout`, {method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({proposalId, option:1, paymentNumber:1, amountCents:Math.round(amount*100),
-          description:`ReDry Fixed Lease Full Payment - ${form.projectName}`, paymentMethod:useAch?"ach":"card",
-          clientCompany:form.clientCompany, projectName:form.projectName})});
-      const d = await r.json();
-      if(d.url) window.location.href = d.url; else alert("Error: " + (d.error||"Unknown"));
-    } catch(e) { alert("Payment error. Please try again."); }
-    setCheckoutLoading(false);
-  };
+  // No checkout is initiated from the proposal — ReDry invoices separately.
+  // See the note in ClientView; the ?payment=success handler records a
+  // payment collected elsewhere, it never starts one.
 
   const doAccept = async()=>{
     if(!sigName||!sigDate||!termsOk)return;
@@ -1431,13 +1400,6 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
         </div>
         <div style={{marginTop:16,fontSize:12,color:C.gray}}>
           <a href="/warranty" target="_blank" rel="noopener" style={{color:C.gray,textDecoration:"underline"}}>View the Limited Material Warranty Agreement</a>
-        </div>
-        <div style={{marginTop:20,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
-          <div style={{fontSize:12,color:C.gray,marginBottom:8}}>Prefer to pay online now instead of waiting for the invoice?</div>
-          <button onClick={()=>doCheckout()} disabled={checkoutLoading}
-            style={{padding:"9px 20px",border:`1px solid ${C.border}`,borderRadius:6,background:"#fff",color:C.navy,fontSize:13,fontWeight:600,cursor:checkoutLoading?"wait":"pointer"}}>
-            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? opt.payments[0].achAmount : opt.payments[0].amount)} now`}
-          </button>
         </div>
       </div>
     </div>
@@ -1501,10 +1463,10 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
         <B html="Vents remain the property of ReDry, LLC and will be retrieved at the conclusion of the lease term."/>
         {(()=>{ const sa=[form.shipAddress,form.shipCity,form.shipState,form.shipZip].filter(Boolean).join(", "); return sa ? <B html={`Vents will be shipped to: <strong>${escHtml(sa)}</strong>`}/> : null; })()}
 
-        {SH(3,"Pricing and Payment")}
+        {SH(3,"Pricing")}
         <P>The vent rental is based on <strong>{numVents} vent{numVents!==1?"s":""}</strong> at <strong>{fmtC(ventRate)} per vent</strong> for a <strong>{leaseTerm}-month</strong> lease term.</P>
 
-        <P>Payment is due in full upon contract execution.</P>
+        <P>Nothing is charged here. ReDry will invoice you separately for the full amount following contract execution.</P>
 
         <div style={{background:"#f8fafc",borderRadius:8,padding:"14px 18px",margin:"12px 0 8px",fontSize:13,lineHeight:1.8,color:"#374151"}}>
           <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontWeight:700,color:C.navy}}>Vent Rental</span><span>{numVents} &times; {fmtC(ventRate)} = {fmtC(leaseTotal)}</span></div>

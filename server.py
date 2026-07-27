@@ -839,7 +839,7 @@ def send_proposal(pid):
       <div style="padding:28px;background:#fff;border:1px solid #e2e8f0">
         <p style="font-size:15px;line-height:1.7;color:#374151">{f'Hi {contact},' if contact else 'Hello,'}</p>
         <p style="font-size:14px;line-height:1.7;color:#374151">Thank you for the opportunity to work with {company} on <strong>{project}</strong>{f' ({section})' if section else ''}. We appreciate your trust in ReDry to solve the moisture challenges on this roof.</p>
-        <p style="font-size:14px;line-height:1.7;color:#374151">Please find your fixed lease proposal attached and summarized below. You can also review the full details and accept the proposal online.</p>
+        <p style="font-size:14px;line-height:1.7;color:#374151">Please find your fixed lease proposal attached and summarized below. You can also review the full details and sign online. Nothing is charged online &mdash; we invoice separately once the agreement is signed.</p>
 
         <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
           <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Lease Summary</p>
@@ -864,7 +864,7 @@ def send_proposal(pid):
         </div>
 
         <div style="margin:24px 0;text-align:center">
-          <a href="{proposal_url}" style="display:inline-block;background:#E8943A;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">View &amp; Accept Proposal</a>
+          <a href="{proposal_url}" style="display:inline-block;background:#E8943A;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">Review &amp; Sign Proposal</a>
         </div>
         <p style="font-size:13px;color:#64748b;line-height:1.6">If you have any questions at all, just reply to this email. We're happy to walk through the proposal with you or adjust anything to fit your needs.</p>
       </div>
@@ -922,7 +922,7 @@ def send_proposal(pid):
       <div style="padding:28px;background:#fff;border:1px solid #e2e8f0">
         <p style="font-size:15px;line-height:1.7;color:#374151">{f'Hi {contact},' if contact else 'Hello,'}</p>
         <p style="font-size:14px;line-height:1.7;color:#374151">Thank you for the opportunity to work with {company} on <strong>{project}</strong>{f' ({section})' if section else ''}. We appreciate your trust in ReDry to solve the moisture challenges on this roof.</p>
-        <p style="font-size:14px;line-height:1.7;color:#374151">Please find your proposal attached and summarized below. You can also review the full details, select your payment option, and accept the proposal online.</p>
+        <p style="font-size:14px;line-height:1.7;color:#374151">Please find your proposal attached and summarized below. You can also review the full details, choose the payment option that works best for you, and sign online. Nothing is charged online &mdash; we invoice separately once the agreement is signed.</p>
 
         <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
           <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Project Summary</p>
@@ -947,7 +947,7 @@ def send_proposal(pid):
         </div>
 
         <div style="margin:24px 0;text-align:center">
-          <a href="{proposal_url}" style="display:inline-block;background:#E8943A;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">View &amp; Accept Proposal</a>
+          <a href="{proposal_url}" style="display:inline-block;background:#E8943A;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">Review &amp; Sign Proposal</a>
         </div>
         <p style="font-size:13px;color:#64748b;line-height:1.6">If you have any questions at all, just reply to this email. We're happy to walk through the proposal with you or adjust anything to fit your needs.</p>
       </div>
