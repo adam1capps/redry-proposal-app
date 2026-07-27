@@ -325,6 +325,103 @@ function PHDTable({compact}) {
   </table>);
 }
 
+// ─── LIMITED MATERIAL WARRANTY ───
+// Verbatim text of the ReDry LLC Limited Material Warranty Agreement. This is
+// a legal instrument — do not reword, summarize, or "clean up" these strings
+// without counsel sign-off. Served standalone at /warranty and incorporated
+// by reference into the General Conditions of every proposal, so the client
+// is agreeing to exactly this text when they sign.
+const WARRANTY_VERSION = "2026-01";
+const WARRANTY_SECTIONS = [
+  {n:1, t:"Warranty Term", p:[
+    'This Limited Warranty Agreement (this "Warranty") is entered into by and between ReDry and Customer (the "Parties," and each, a "Party"). The protections provided under this Warranty shall begin on the Effective Date and shall continue until the Dry Date (the "Warranty Term").'
+  ]},
+  {n:2, t:"Scope of Warranty and the Work", p:[
+    'ReDry has developed a proprietary and novel process for the effective drying of roofs (the "Process"). ReDry shall utilize the Process to remove moisture from the substrate of the Roof. Unless otherwise required by law, for all intents and purposes herein, "dry" or "field dry" shall be defined as meaning an average moisture content not to exceed twenty five percent (25%) volumetric moisture content. For states that have a different statutory definition of "dry" in this context, that state’s definition shall apply. ReDry may use any commercially acceptable means to measure the moisture content of the Roof, including but not limited to probe tests, conductivity tests, nuclear moisture tests, or any other means generally accepted in ReDry’s industry. ReDry shall work with the roofing contractor and other tradesmen in order to implement the Process, such as by installing ReDry’s proprietary drying systems ("Fans") to previously existing vents, such vents to be installed by the roofing contractor. This Warranty shall begin on the Effective Date and shall terminate on the Dry Date. In the interval between the Effective Date and the Dry Date (the "Warranty Term"), ReDry will periodically inspect the Roof and make adjustments to the location of the Fans, track the progress of the Process, and make any other changes ReDry may deem necessary in order to fulfill its obligations to you hereunder. ReDry certifies to you that pursuant to the Process and the efforts of ReDry, your Roof will be field dry within two (2) years of the Effective Date, on or before the Dry Date. Customer understands and acknowledges that its full cooperation and compliance with ReDry during the Warranty Term are necessary prerequisites to the effective implementation of the Process.',
+    'ReDry shall perform its work hereunder in a timely, professional, and workmanlike manner. ReDry shall cooperate in good faith with Customer with respect to scheduling and logistical matters. ReDry warrants that it will remove the moisture from the substrate of your Roof pursuant to the Process. Unless otherwise agreed in writing or where required by law, the moisture percentage of your Roof shall be reduced to twenty five percent (25%) or field dry by the end of the Warranty Term. Be advised, however, that circumstances beyond ReDry’s control, such as hurricanes, floods, and other acts of God may cause this stated moisture content percentage to fluctuate or change, either during or after the expiration of the Warranty Term, which, in any event, shall not be deemed to be the fault of ReDry, nor shall such changes or fluctuations due to unforeseen causes be construed as a breach of this Warranty. ReDry may use any and all commercially acceptable means at its disposal in order to effectuate this Warranty. ReDry warrants that any Fans supplied by us shall be of good quality and free from any material defects. Any defective Fans shall be replaced by us at no cost to you, but only in the event that the defect was latent and not caused by external forces subsequent to installation and beyond ReDry’s control. Upon the expiration of the Warranty Term, ReDry shall issue a certificate to Customer stating that the Roof has been successfully dried pursuant to this Warranty. Any additional services performed for Customer subsequent to the issuance of the certificate may be subject to additional charges, to be issued at the discretion of ReDry. Upon the expiration of the Warranty Term, ReDry shall be entitled to remove its Fans from the Roof and replace them with the manufacturer-provided vent caps. Due to the unpredictable nature of the Work and the interdependency of ReDry’s Work with the work of other contractors and tradesmen, time is not of the essence with respect to the performance of the Work hereunder. That said, ReDry shall use its good faith best efforts to ensure that all of its obligations hereunder are satisfied upon the expiration of the Warranty Term.'
+  ]},
+  {n:3, t:"License to Access Property", p:[
+    'In order for ReDry to fulfill its obligations under this Warranty, ReDry must have access to the Roof. Therefore, Customer hereby grants ReDry a revocable limited license for the duration of the Warranty Term to access the Roof and any structures, appurtenances, or conveyances necessary to access the same. ReDry shall provide reasonable notice to Customer before entering the Property or making any repairs. ReDry and Customer covenant to act in good faith and to make reasonable accommodations for each other with respect to scheduling matters under this Agreement. For all purposes hereunder, text messages, emails, and phone calls shall all constitute reasonable forms of notice. Customer covenants that this limited license shall not be revoked without ten (10) business days’ notice and a reasonable final opportunity for ReDry to access the Property in order to remove its Fans and other property from the Roof.'
+  ]},
+  {n:4, t:"Early Termination of Warranty For Cause", p:[
+    'If Customer revokes ReDry’s limited license to access the Property by (1) repeatedly refusing to allow ReDry to access the Property without legitimate justification or (2) otherwise failing to cooperate with ReDry in any way, ReDry reserves the right to cancel this Limited Warranty for cause. Customer acknowledges that Customer’s failure to cooperate with ReDry materially frustrates the purpose of this Warranty and renders ReDry’s performance of this Warranty impossible and/or impracticable. Customer shall be entitled to seven (7) days’ notice before early termination for cause of this Warranty and an opportunity to cure.'
+  ]},
+  {n:5, t:"Limitations and Exclusions from the Warranty", p:[
+    'Customer understands and acknowledges that ReDry LLC is a moisture removal service but is not a roofing contractor within the meaning of Tenn. Code Ann. § 62-6-102(4)(A) and Tenn. Code Ann. § 62-6-601. Therefore, any issues and repairs relating to the construction or installation of the Roof system are solely the responsibility of Customer and Customer’s roofing contractor. Any manufacturer’s warranty (other than for products furnished by ReDry) is expressly disclaimed and excluded from this Warranty. ReDry shall not be responsible for work performed or damage caused by other contractors before or after the Effective Date. Any material interference with our work by another contractor or person with access to the Roof shall be grounds for the revocation of this Warranty. Any product or manufacturing defect, other than defects in products supplied by us, shall be excluded from this Warranty. Any damage caused by fire, storms, wind, hurricanes, tornados, accidents, vandalism, or acts of God shall not be covered under this Warranty. Whether or not an item is or is not covered under this Warranty shall be subject to ReDry’s sole and good faith discretion. ReDry shall have no obligations whatsoever under this Warranty if there are any outstanding and unpaid invoices, and shall not perform any additional services, whether to Customer or any subsequent purchaser, in the event that outstanding invoices remain unpaid. ReDry shall have no liability whatsoever with respect to claims related to (1) vapor drive, (2) pervasive condensation issues, or (3) the delamination of coatings, as these are all expressly made the sole and exclusive responsibility of Customer and Customer’s roofing contractor. All implied warranties, including but not limited to the implied warranties of merchantability, habitability, and fitness for a particular purpose, are hereby expressly disclaimed by us and waived by you.'
+  ]},
+  {n:6, t:"Dispute Resolution, Venue, and Choice of Law", p:[
+    'In the event that a dispute arises under this Warranty that cannot be resolved between the Parties themselves, the Parties agree to first submit their disagreement to informal mediation, the costs of such mediation to be split between the Parties. In the event that no amicable resolution is reached during private mediation, the Parties agree to submit their claims to the state or federal courts sitting in Davidson County, Tennessee. This Warranty shall be governed by the laws of the State of Tennessee.'
+  ]},
+  {n:7, t:"Limitation of Liability", p:[
+    'As an express inducement to enter into this Warranty with us and as consideration therefor, you hereby waive the right to seek any punitive, special, exemplary, consequential, liquidated, or compensatory damages from us, regardless of the legal or equitable basis for such claims. This waiver shall extend to our subcontractors, agents, and assigns. Your sole and maximum remedy under this Warranty shall be additional work and services performed by us, if applicable.',
+    'Additionally, ReDry shall not be liable for all claims and damages, and Customer waives all claims and damages, whether actual or consequential, arising out of or relating to Acts of God, accidents, civil disturbances, terrorism, delays in obtaining materials, fires, hurricanes, floods, unforeseeable changes in water table, mudslide, earthquake, volcanic eruption, wind-driven water, lightning and other weather conditions, pandemics, medical emergencies that have resulted in local, state, or federal state of emergency, viruses or illnesses requiring quarantine, strikes, riots, war, or other causes beyond ReDry’s control.'
+  ]},
+  {n:8, t:"No Transfer of Warranty", p:[
+    'This Warranty is not transferrable without the express written consent of ReDry.'
+  ]},
+  {n:9, t:"Intellectual Property", p:[
+    'Customer expressly agrees that it shall not attempt, cause, or permit the reverse-engineering of the Process, the Fans, or any other products supplied by ReDry. Failure to abide by this restriction shall constitute a material breach of this Warranty.'
+  ]},
+  {n:10, t:"Indemnification and Attorney’s Fees", p:[
+    'In the event that ReDry is forced to employ an attorney to enforce any of the provisions of this Warranty, to defend any claims filed against it arising out of or related to this Warranty, or otherwise to protect its interest in any matter arising under, out of, or related to this Warranty, ReDry shall be entitled to recover from Customer all of its attorney’s fees, costs, and expenses, including attorney’s fees incurred through trial, arbitration, appeals, and any bankruptcy proceeding. Customer shall defend, indemnify, and hold ReDry harmless from and against any and all claims, demands, losses, damages, liabilities, expenses, or costs, including reasonable attorney’s fees, costs and expenses of investigation, penalties, interest, and amounts paid in settlement (collectively "Losses") incurred or to be incurred by ReDry, arising out of, relating to, or resulting from any negligence, personal injury, wrongful death, or property damage which is caused or occasioned by the acts of Customer, including claims for those damages caused partly as a result of the negligence or wrongful acts of ReDry if the damages claimed relate to, arise out of, or are connected with this Warranty or the actions necessary to perform same.'
+  ]},
+  {n:11, t:"Waiver of Jury Trial", p:[
+    'The Parties agree that, as an express inducement to enter into this Limited Warranty Agreement and as consideration therefor, both Parties hereby irrevocably waive the right to seek a trial by jury for claims related in any way to this Warranty.'
+  ]},
+  {n:12, t:"Remedy", p:[
+    'ReDry agrees to procure and provide all materials necessary to restore the roofing system to the condition that the ReDry process was designed to achieve if the specified results of this agreement are not attained within two (2) years from the Effective Date. ReDry’s liability under this warranty is strictly limited to the waterproofing membrane and any insulation explicitly contracted to be "dry" that remains wet at the expiration of the two (2) year warranty period.',
+    'ReDry shall not be responsible for any costs beyond the direct expense of materials and applicable sales tax. Excluded costs include, but are not limited to, labor, equipment, lifts, dock fees, handling fees, storage, overhead, profits, and shipping.',
+    'ReDry reserves the exclusive right to source and obtain the required materials from any manufacturer or supplier at its discretion. ReDry will exercise good faith in sourcing these materials and in making the claimant whole within a reasonable time frame.'
+  ]},
+  {n:13, t:"Signatures", p:[
+    'By signing the proposal that incorporates this Warranty, you affirm that you have read and fully understood each and every provision of this Limited Warranty Agreement.'
+  ]},
+];
+
+function WarrantyView() {
+  const para = {fontSize:14,lineHeight:1.75,color:"#374151",margin:"8px 0",textAlign:"justify"};
+  return (<div style={{minHeight:"100vh",background:C.bg}}>
+    <div style={{background:C.navy,padding:"10px 0"}}>
+      <div style={{maxWidth:820,margin:"0 auto",padding:"0 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{color:"#fff",fontSize:13,fontWeight:600,letterSpacing:1}}>RE<span style={{color:C.orange}}>DRY</span></span>
+        <button onClick={()=>window.print()} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",padding:"5px 14px",borderRadius:4,fontSize:12,cursor:"pointer"}}>Print</button>
+      </div>
+    </div>
+    <div style={{maxWidth:820,margin:"0 auto",padding:"32px 20px 60px"}}>
+      <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
+        <div style={{height:4,background:C.orange}}/>
+        <div style={{padding:"28px 32px"}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>ReDry LLC</div>
+          <h1 style={{fontSize:26,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>Limited Material Warranty Agreement</h1>
+          <div style={{height:2,width:60,background:C.orange,margin:"12px 0 18px"}}/>
+          <p style={{...para,textAlign:"left",color:C.gray,fontSize:13}}>
+            This is the standard form of the ReDry Limited Material Warranty Agreement, incorporated by reference into
+            each ReDry proposal. The Customer, Property, Contract Price, Effective Date, and Estimated Dry Date are
+            completed from the accepted proposal at the time of execution.
+          </p>
+          <div style={{background:"#f8fafc",borderRadius:8,padding:"16px 20px",margin:"18px 0 8px",fontSize:13,lineHeight:1.9,color:"#374151"}}>
+            <div style={{fontWeight:700,color:C.navy,marginBottom:6}}>ReDry LLC</div>
+            <div>640 Myatt Drive, Madison, TN 37115</div>
+            <div>adam@re-dry.com &nbsp;&bull;&nbsp; (865) 771-3848</div>
+          </div>
+
+          {WARRANTY_SECTIONS.map(s=>(
+            <div key={s.n} style={{marginTop:26}}>
+              <h2 style={{fontSize:15,fontWeight:800,color:C.navy,margin:"0 0 6px"}}>{s.n}. {s.t}</h2>
+              <div style={{height:2,width:36,background:C.orange,marginBottom:10}}/>
+              {s.p.map((txt,i)=><p key={i} style={para}>{txt}</p>)}
+            </div>
+          ))}
+
+          <div style={{marginTop:32,paddingTop:18,borderTop:`1px solid ${C.border}`,fontSize:12,color:C.gray,textAlign:"center"}}>
+            ReDry, LLC &nbsp;&bull;&nbsp; Advancing the Science of Moisture Removal &nbsp;&bull;&nbsp; Form rev. {WARRANTY_VERSION}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>);
+}
+
 // ─── BUILDER FORM ───
 function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,taxRate,setTaxRate,onSearch,onDashboard,onBack}) {
   const fileRef = useRef();
@@ -914,6 +1011,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   const [sigName,setSigName]=useState(""), [sigDate,setSigDate]=useState("");
   const [accepted,setAccepted]=useState(false), [submitting,setSubmitting]=useState(false);
   const [selectedOption,setSelectedOption]=useState(null);
+  const [termsOk,setTermsOk]=useState(false);
   const [payingWith,setPayingWith]=useState("card");
   const [checkoutLoading,setCheckoutLoading]=useState(false);
   const savedTaxRate = parseFloat(form.taxRate) || 0;
@@ -987,12 +1085,13 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   };
 
   const doAccept = async()=>{
-    if(!sigName||!sigDate||(selectedOption===null && !form.hidePricing))return;
+    if(!sigName||!sigDate||!termsOk||(selectedOption===null && !form.hidePricing))return;
     setSubmitting(true);
     try{
       if(proposalId) {
         const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption!==null?selectedOption+1:null})});
+          body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption!==null?selectedOption+1:null,
+            paymentMethod:form.hidePricing?null:payingWith, warrantyAccepted:termsOk, warrantyVersion:WARRANTY_VERSION})});
         if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
         if(!r.ok){ alert("Failed to submit acceptance. Please try again."); setSubmitting(false); return; }
       }
@@ -1010,24 +1109,31 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
       <div style={{textAlign:"center",maxWidth:540,padding:40}}>
         <div style={{width:72,height:72,borderRadius:"50%",background:"#dcfce7",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",fontSize:32}}>&#10003;</div>
-        <h1 style={{fontSize:26,fontWeight:800,color:C.navy,fontFamily:"'Playfair Display',serif",marginBottom:8}}>Proposal Accepted</h1>
-        <p style={{color:C.gray,fontSize:15,lineHeight:1.6}}>Thank you. Your signed acceptance has been recorded. The ReDry team will be in touch to coordinate next steps.</p>
-        <div style={{marginTop:24,padding:16,background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,color:C.gray}}>
+        <h1 style={{fontSize:26,fontWeight:800,color:C.navy,fontFamily:"'Playfair Display',serif",marginBottom:8}}>Agreement Signed</h1>
+        <p style={{color:C.gray,fontSize:15,lineHeight:1.6}}>Thank you. Your signature has been recorded and a copy of the signed agreement is on its way to your inbox.</p>
+        <div style={{marginTop:24,padding:16,background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,color:C.gray,textAlign:"left"}}>
           <div>Signed by: <strong style={{color:C.dark}}>{sigName}</strong></div>
           <div>Date: <strong style={{color:C.dark}}>{sigDate}</strong></div>
-          <div>Selected: <strong style={{color:C.dark}}>{options[selectedOption]?.label || `Option ${selectedOption+1}`}</strong></div>
+          {selectedOption!==null && <div>Selected: <strong style={{color:C.dark}}>{options[selectedOption]?.label || `Option ${selectedOption+1}`}</strong></div>}
+          {!form.hidePricing && <div>Preferred payment: <strong style={{color:C.dark}}>{payingWith==="ach"?"ACH / Bank Transfer":"Credit Card"}</strong></div>}
+          <div>Warranty: <strong style={{color:C.dark}}>Limited Material Warranty Agreement accepted</strong></div>
         </div>
-        {selectedOption!==null && <div style={{marginTop:20}}>
-          <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:12}}>Complete Payment</div>
-          <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:12}}>
-            <button onClick={()=>setPayingWith("card")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
-            <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>
-              ACH / Bank Transfer {options[selectedOption].achEligible && "(Save $100)"}
-            </button>
-          </div>
+        {!form.hidePricing && <div style={{marginTop:20,padding:"16px 18px",background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,textAlign:"left"}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:6}}>What happens next</div>
+          <p style={{fontSize:13,color:C.gray,lineHeight:1.7,margin:0}}>
+            No payment was collected today. <strong style={{color:C.dark}}>You will receive an invoice separately</strong> for
+            {" "}{(options[selectedOption]?.label || "the selected option").replace(/\.\s*$/,"")}, payable by {payingWith==="ach"?"ACH / bank transfer":"credit card"}.
+            The ReDry team will also reach out to coordinate scheduling.
+          </p>
+        </div>}
+        <div style={{marginTop:16,fontSize:12,color:C.gray}}>
+          <a href="/warranty" target="_blank" rel="noopener" style={{color:C.gray,textDecoration:"underline"}}>View the Limited Material Warranty Agreement</a>
+        </div>
+        {selectedOption!==null && !form.hidePricing && <div style={{marginTop:20,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+          <div style={{fontSize:12,color:C.gray,marginBottom:8}}>Prefer to pay online now instead of waiting for the invoice?</div>
           <button onClick={()=>doCheckout(selectedOption, 0)} disabled={checkoutLoading}
-            style={{padding:"14px 32px",border:"none",borderRadius:8,background:C.orange,color:"#fff",fontSize:15,fontWeight:700,cursor:checkoutLoading?"wait":"pointer"}}>
-            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? options[selectedOption].payments[0].achAmount : options[selectedOption].payments[0].amount)} — ${options[selectedOption].payments[0].label}`}
+            style={{padding:"9px 20px",border:`1px solid ${C.border}`,borderRadius:6,background:"#fff",color:C.navy,fontSize:13,fontWeight:600,cursor:checkoutLoading?"wait":"pointer"}}>
+            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? options[selectedOption].payments[0].achAmount : options[selectedOption].payments[0].amount)} now`}
           </button>
         </div>}
       </div>
@@ -1155,15 +1261,16 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
             </div>
           );})}
         </div>}
-        {SH(4,"General Conditions")}
+        {SH(4,"Terms and Conditions")}
         {[["4.1 Relationship of Parties","ReDry is the manufacturer and lessor of the ReDry Vent System and is not a roofing contractor or subcontractor."],
           ["4.2 Roofing Contractor Responsibilities","The roofing contractor is solely responsible for installing and bonding the 2-Way Vents per the ReDry Installation Specification."],
           ["4.3 Installation Specification","All work shall be performed per ReDry Vent System Installation Specification SPEC-VENT-2026-01 (Rev. A)."],
           ["4.4 Placement Map","The ReDry Placement Map is a controlled engineering document and shall not be modified without written authorization from ReDry."],
-          ["4.5 Warranty","System warranty activation requires complete photo documentation, passed QC inspection, and installation by a qualified roofing contractor."],
+          ["4.5 Limited Material Warranty", <>The <strong>ReDry Limited Material Warranty Agreement</strong> is incorporated into and made part of this agreement by reference. It governs the warranty term, ReDry's drying obligation, limitations and exclusions, limitation of liability, indemnification, waiver of jury trial, and dispute resolution. Warranty activation additionally requires complete photo documentation, passed QC inspection, and installation by a qualified roofing contractor. <a href="/warranty" target="_blank" rel="noopener" style={{color:C.orange,fontWeight:700,textDecoration:"underline"}}>Read the full Limited Material Warranty Agreement &rarr;</a></>],
           ["4.6 Equipment Ownership","All ReDry Vent heads remain the sole property of ReDry, LLC throughout the lease period."],
           ["4.7 Access","The client shall provide safe, unobstructed access to the roof area during commissioning and each scheduled scan."],
-          ["4.8 Proposal Validity",`This proposal is valid for ${parseInt(form.validDays)||30} days from date of issue (${vt}).`],
+          ["4.8 Invoicing","No payment is collected at signing. ReDry will invoice separately in accordance with the payment option selected above and the preferred payment method indicated at signature."],
+          ["4.9 Proposal Validity",`This proposal is valid for ${parseInt(form.validDays)||30} days from date of issue (${vt}).`],
         ].map(([t,x])=><p key={t} style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"10px 0",textAlign:"justify"}}><strong style={{color:C.navy}}>{t}.</strong>&nbsp;&nbsp;{x}</p>)}
       </div>
       {ventMapUrl && <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
@@ -1172,15 +1279,15 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
         <img src={ventMapUrl} alt="Vent Placement Map" style={{width:"100%",borderRadius:8,border:`1px solid ${C.border}`}}/>
       </div>}
       <div style={{background:"#fff",borderRadius:12,border:`2px solid ${C.orange}`,padding:"28px 32px"}}>
-        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>{form.hidePricing ? "Acceptance" : "Acceptance and Payment"}</h2>
+        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Sign and Accept</h2>
         <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
         {!form.hidePricing && selectedOption===null && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:16}}>
           <div style={{fontSize:14,fontWeight:600,color:C.orange}}>Please select a payment option above to continue.</div>
         </div>}
         {(form.hidePricing || selectedOption!==null) && <>
           {form.hidePricing
-            ? <P>By signing below, you accept this complimentary proposal and the terms described herein.</P>
-            : <P>By signing below, you accept this proposal under <strong>{options[selectedOption].label}</strong> and the terms described herein.</P>}
+            ? <P>By signing below, you accept this complimentary proposal and agree to the Terms and Conditions above, including the ReDry Limited Material Warranty Agreement incorporated by reference.</P>
+            : <P>By signing below, you accept this proposal under <strong>{options[selectedOption].label}</strong> and agree to the Terms and Conditions above, including the ReDry Limited Material Warranty Agreement incorporated by reference.</P>}
           <div style={{display:"flex",gap:16,marginTop:20,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:200}}>
               <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Full Name / Title</label>
@@ -1191,16 +1298,26 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
               <input type="date" value={sigDate} onChange={e=>setSigDate(e.target.value)} style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
             </div>
           </div>
-          {!form.hidePricing && <div style={{marginTop:16,display:"flex",gap:8,alignItems:"center"}}>
-            <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Payment method:</span>
-            <button onClick={()=>setPayingWith("card")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
-            <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>
-              ACH / Bank Transfer {options[selectedOption]?.achEligible ? "(Save $100)" : ""}
-            </button>
+          <label style={{display:"flex",gap:10,alignItems:"flex-start",marginTop:16,cursor:"pointer",fontSize:13,lineHeight:1.6,color:"#374151"}}>
+            <input type="checkbox" checked={termsOk} onChange={e=>setTermsOk(e.target.checked)} style={{marginTop:3,width:16,height:16,accentColor:C.orange,flexShrink:0,cursor:"pointer"}}/>
+            <span>I have read and agree to the Terms and Conditions of this proposal and to the ReDry <a href="/warranty" target="_blank" rel="noopener" style={{color:C.orange,fontWeight:700}}>Limited Material Warranty Agreement</a>.</span>
+          </label>
+          {!form.hidePricing && <div style={{marginTop:18,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+            <div style={{fontSize:13,fontWeight:600,color:C.navy,marginBottom:2}}>Preferred payment method</div>
+            <div style={{fontSize:12,color:C.gray,marginBottom:8}}>For invoicing only &mdash; nothing is charged when you sign.</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button onClick={()=>setPayingWith("card")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
+              <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                ACH / Bank Transfer {options[selectedOption]?.achEligible ? "(Save $100)" : ""}
+              </button>
+            </div>
           </div>}
-          <button onClick={doAccept} disabled={!sigName||!sigDate||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&!submitting?"pointer":"not-allowed"}}>
-            {submitting?"Submitting...": form.hidePricing ? "Accept Proposal" : "Accept Proposal and Pay Deposit"}
+          <button onClick={doAccept} disabled={!sigName||!sigDate||!termsOk||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&termsOk&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&termsOk&&!submitting?"pointer":"not-allowed"}}>
+            {submitting?"Submitting...":"Sign and Accept Agreement"}
           </button>
+          {!form.hidePricing && <div style={{marginTop:10,fontSize:12,color:C.gray,textAlign:"center",lineHeight:1.6}}>
+            No payment is collected now. We&rsquo;ll email you a copy of the signed agreement and invoice you separately.
+          </div>}
         </>}
       </div>
     </div>
@@ -1211,6 +1328,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
 function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
   const [sigName,setSigName]=useState(""), [sigDate,setSigDate]=useState("");
   const [accepted,setAccepted]=useState(false), [submitting,setSubmitting]=useState(false);
+  const [termsOk,setTermsOk]=useState(false);
   const [payingWith,setPayingWith]=useState("card");
   const [checkoutLoading,setCheckoutLoading]=useState(false);
   const savedTaxRate = parseFloat(form.taxRate) || 0;
@@ -1273,12 +1391,13 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
   };
 
   const doAccept = async()=>{
-    if(!sigName||!sigDate)return;
+    if(!sigName||!sigDate||!termsOk)return;
     setSubmitting(true);
     try{
       if(proposalId) {
         const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({name:sigName,date:sigDate,selectedOption:1})});
+          body:JSON.stringify({name:sigName,date:sigDate,selectedOption:1,
+            paymentMethod:payingWith, warrantyAccepted:termsOk, warrantyVersion:WARRANTY_VERSION})});
         if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
         if(!r.ok){ alert("Failed to submit acceptance. Please try again."); setSubmitting(false); return; }
       }
@@ -1295,23 +1414,29 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
       <div style={{textAlign:"center",maxWidth:540,padding:40}}>
         <div style={{width:72,height:72,borderRadius:"50%",background:"#dcfce7",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",fontSize:32}}>&#10003;</div>
-        <h1 style={{fontSize:26,fontWeight:800,color:C.navy,fontFamily:"'Playfair Display',serif",marginBottom:8}}>Proposal Accepted</h1>
-        <p style={{color:C.gray,fontSize:15,lineHeight:1.6}}>Thank you. Your signed acceptance has been recorded. The ReDry team will be in touch to coordinate next steps.</p>
-        <div style={{marginTop:24,padding:16,background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,color:C.gray}}>
+        <h1 style={{fontSize:26,fontWeight:800,color:C.navy,fontFamily:"'Playfair Display',serif",marginBottom:8}}>Agreement Signed</h1>
+        <p style={{color:C.gray,fontSize:15,lineHeight:1.6}}>Thank you. Your signature has been recorded and a copy of the signed agreement is on its way to your inbox.</p>
+        <div style={{marginTop:24,padding:16,background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,color:C.gray,textAlign:"left"}}>
           <div>Signed by: <strong style={{color:C.dark}}>{sigName}</strong></div>
           <div>Date: <strong style={{color:C.dark}}>{sigDate}</strong></div>
+          <div>Preferred payment: <strong style={{color:C.dark}}>{payingWith==="ach"?"ACH / Bank Transfer":"Credit Card"}</strong></div>
+          <div>Warranty: <strong style={{color:C.dark}}>Limited Material Warranty Agreement accepted</strong></div>
         </div>
-        <div style={{marginTop:20}}>
-          <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:12}}>Complete Payment</div>
-          <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:12}}>
-            <button onClick={()=>setPayingWith("card")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
-            <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 16px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:13,fontWeight:600,cursor:"pointer"}}>
-              ACH / Bank Transfer {opt.achEligible && "(Save $100)"}
-            </button>
-          </div>
+        <div style={{marginTop:20,padding:"16px 18px",background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,textAlign:"left"}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:6}}>What happens next</div>
+          <p style={{fontSize:13,color:C.gray,lineHeight:1.7,margin:0}}>
+            No payment was collected today. <strong style={{color:C.dark}}>You will receive an invoice separately</strong> for {fmtC(payingWith==="ach"?opt.achTotal:opt.total)},
+            payable by {payingWith==="ach"?"ACH / bank transfer":"credit card"}. The ReDry team will also reach out to coordinate scheduling.
+          </p>
+        </div>
+        <div style={{marginTop:16,fontSize:12,color:C.gray}}>
+          <a href="/warranty" target="_blank" rel="noopener" style={{color:C.gray,textDecoration:"underline"}}>View the Limited Material Warranty Agreement</a>
+        </div>
+        <div style={{marginTop:20,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+          <div style={{fontSize:12,color:C.gray,marginBottom:8}}>Prefer to pay online now instead of waiting for the invoice?</div>
           <button onClick={()=>doCheckout()} disabled={checkoutLoading}
-            style={{padding:"14px 32px",border:"none",borderRadius:8,background:C.orange,color:"#fff",fontSize:15,fontWeight:700,cursor:checkoutLoading?"wait":"pointer"}}>
-            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? opt.payments[0].achAmount : opt.payments[0].amount)} Now`}
+            style={{padding:"9px 20px",border:`1px solid ${C.border}`,borderRadius:6,background:"#fff",color:C.navy,fontSize:13,fontWeight:600,cursor:checkoutLoading?"wait":"pointer"}}>
+            {checkoutLoading ? "Redirecting to Stripe..." : `Pay ${fmtC(payingWith==="ach" ? opt.payments[0].achAmount : opt.payments[0].amount)} now`}
           </button>
         </div>
       </div>
@@ -1389,14 +1514,16 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
           {opt.achEligible && <div style={{color:C.green,fontSize:12,marginTop:4}}>Save $100 when paying via ACH / bank transfer ({fmtC(opt.achTotal)})</div>}
         </div>
 
-        {SH(4,"General Conditions")}
+        {SH(4,"Terms and Conditions")}
         {[["4.1 Relationship of Parties","ReDry is the manufacturer and lessor of the ReDry Vent System and is not a roofing contractor or subcontractor."],
           ["4.2 Roofing Contractor Responsibilities","The roofing contractor is solely responsible for installing and bonding the 2-Way Vents per the ReDry Installation Specification."],
           ["4.3 Installation Specification","All work shall be performed per ReDry Vent System Installation Specification SPEC-VENT-2026-01 (Rev. A)."],
           ["4.4 Equipment Ownership","All ReDry Vent heads remain the sole property of ReDry, LLC throughout the lease period."],
           ["4.5 Lease Term",`The lease term is ${leaseTerm} months from the date of installation. Vents will be retrieved at the conclusion of the lease term.`],
-          ["4.6 Access","The client shall provide safe, unobstructed access to the roof area during commissioning."],
-          ["4.7 Proposal Validity",`This proposal is valid for ${parseInt(form.validDays)||30} days from date of issue (${vt}).`],
+          ["4.6 Limited Material Warranty", <>The <strong>ReDry Limited Material Warranty Agreement</strong> is incorporated into and made part of this agreement by reference. It governs the warranty term, ReDry's drying obligation, limitations and exclusions, limitation of liability, indemnification, waiver of jury trial, and dispute resolution. <a href="/warranty" target="_blank" rel="noopener" style={{color:C.orange,fontWeight:700,textDecoration:"underline"}}>Read the full Limited Material Warranty Agreement &rarr;</a></>],
+          ["4.7 Access","The client shall provide safe, unobstructed access to the roof area during commissioning."],
+          ["4.8 Invoicing","No payment is collected at signing. ReDry will invoice separately for the amount due in accordance with the preferred payment method indicated at signature."],
+          ["4.9 Proposal Validity",`This proposal is valid for ${parseInt(form.validDays)||30} days from date of issue (${vt}).`],
         ].map(([t,x])=><p key={t} style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"10px 0",textAlign:"justify"}}><strong style={{color:C.navy}}>{t}.</strong>&nbsp;&nbsp;{x}</p>)}
       </div>
       {ventMapUrl && <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
@@ -1405,9 +1532,9 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
         <img src={ventMapUrl} alt="Vent Placement Map" style={{width:"100%",borderRadius:8,border:`1px solid ${C.border}`}}/>
       </div>}
       <div style={{background:"#fff",borderRadius:12,border:`2px solid ${C.orange}`,padding:"28px 32px"}}>
-        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Acceptance and Payment</h2>
+        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Sign and Accept</h2>
         <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
-        <P>By signing below, you accept this proposal and agree to pay <strong>{fmtC(opt.total)}</strong> in full upon contract execution.</P>
+        <P>By signing below, you accept this proposal in the amount of <strong>{fmtC(opt.total)}</strong> and agree to the Terms and Conditions above, including the ReDry Limited Material Warranty Agreement incorporated by reference.</P>
         <div style={{display:"flex",gap:16,marginTop:20,flexWrap:"wrap"}}>
           <div style={{flex:1,minWidth:200}}>
             <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Full Name / Title</label>
@@ -1418,16 +1545,26 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
             <input type="date" value={sigDate} onChange={e=>setSigDate(e.target.value)} style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
           </div>
         </div>
-        <div style={{marginTop:16,display:"flex",gap:8,alignItems:"center"}}>
-          <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Payment method:</span>
-          <button onClick={()=>setPayingWith("card")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
-          <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>
-            ACH / Bank Transfer {opt.achEligible ? "(Save $100)" : ""}
-          </button>
+        <label style={{display:"flex",gap:10,alignItems:"flex-start",marginTop:16,cursor:"pointer",fontSize:13,lineHeight:1.6,color:"#374151"}}>
+          <input type="checkbox" checked={termsOk} onChange={e=>setTermsOk(e.target.checked)} style={{marginTop:3,width:16,height:16,accentColor:C.orange,flexShrink:0,cursor:"pointer"}}/>
+          <span>I have read and agree to the Terms and Conditions of this proposal and to the ReDry <a href="/warranty" target="_blank" rel="noopener" style={{color:C.orange,fontWeight:700}}>Limited Material Warranty Agreement</a>.</span>
+        </label>
+        <div style={{marginTop:18,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+          <div style={{fontSize:13,fontWeight:600,color:C.navy,marginBottom:2}}>Preferred payment method</div>
+          <div style={{fontSize:12,color:C.gray,marginBottom:8}}>For invoicing only &mdash; nothing is charged when you sign.</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button onClick={()=>setPayingWith("card")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="card"?C.navy:C.border}`,background:payingWith==="card"?C.navy:"#fff",color:payingWith==="card"?"#fff":C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>Credit Card</button>
+            <button onClick={()=>setPayingWith("ach")} style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${payingWith==="ach"?C.green:C.border}`,background:payingWith==="ach"?"#f0fdf4":"#fff",color:payingWith==="ach"?C.green:C.dark,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+              ACH / Bank Transfer {opt.achEligible ? "(Save $100)" : ""}
+            </button>
+          </div>
         </div>
-        <button onClick={doAccept} disabled={!sigName||!sigDate||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&!submitting?"pointer":"not-allowed"}}>
-          {submitting?"Submitting...":"Accept Proposal and Pay in Full"}
+        <button onClick={doAccept} disabled={!sigName||!sigDate||!termsOk||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&termsOk&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&termsOk&&!submitting?"pointer":"not-allowed"}}>
+          {submitting?"Submitting...":"Sign and Accept Agreement"}
         </button>
+        <div style={{marginTop:10,fontSize:12,color:C.gray,textAlign:"center",lineHeight:1.6}}>
+          No payment is collected now. We&rsquo;ll email you a copy of the signed agreement and invoice you separately.
+        </div>
       </div>
     </div>
   </div>);
@@ -1924,6 +2061,9 @@ function App() {
 
   useEffect(()=>{
     const path = window.location.pathname;
+    // Standalone warranty page. Public and static — no proposal data, no
+    // auth, no view logging. Linked from proposal terms and signing emails.
+    if(/^\/warranty\/?$/.test(path)) { setView("warranty"); return; }
     const match = path.match(/^\/proposal\/([a-f0-9]+)$/);
     if(match) {
       const id = match[1];
@@ -2006,6 +2146,7 @@ function App() {
   };
 
   if(view==="loading") return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.gray}}>Loading...</div>;
+  if(view==="warranty") return <WarrantyView/>;
   if(view==="not-found") return (<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg}}>
     <div style={{textAlign:"center",padding:40}}>
       <div style={{width:72,height:72,borderRadius:"50%",background:"#fef2f2",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",fontSize:32,color:"#dc2626"}}>!</div>
