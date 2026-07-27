@@ -1109,9 +1109,19 @@ def accept_proposal(pid):
     if is_proposal_accepted(pid): return jsonify({"error": "already_accepted", "status": "accepted"}), 409
     acc = request.get_json() or {}
     now = datetime.now(timezone.utc)
+    # Payment method is a stated preference captured at signing — it drives how
+    # we invoice, NOT an immediate charge. warrantyAccepted records that the
+    # signer affirmed the Limited Material Warranty incorporated into the
+    # proposal terms; keep it in the signature proof for the audit trail.
+    pay_method = acc.get("paymentMethod") or ""
+    if pay_method not in ("card", "ach"):
+        pay_method = ""
     sig_proof = {
         "proposalId": pid, "signerName": acc.get("name", ""), "signerDate": acc.get("date", ""),
         "selectedOption": acc.get("selectedOption", None),
+        "paymentMethod": pay_method,
+        "warrantyAccepted": bool(acc.get("warrantyAccepted")),
+        "warrantyVersion": acc.get("warrantyVersion", ""),
         "ipAddress": request.headers.get("X-Forwarded-For", request.remote_addr),
         "userAgent": request.headers.get("User-Agent", ""),
         "acceptedAtUTC": now.isoformat(), "acceptedAtUnix": int(now.timestamp()),
@@ -1133,22 +1143,28 @@ def accept_proposal(pid):
     section = html_escape(cfg.get("projectSection", "")); signer = html_escape(acc.get("name", "Unknown"))
     option_num = acc.get("selectedOption", "?"); option_label = OPTION_LABELS.get(option_num, f"Option {option_num}")
     base_url = request.host_url.rstrip("/")
+    pay_label = {"card": "Credit Card", "ach": "ACH / Bank Transfer"}.get(pay_method, "Not specified")
+    option_label_clean = str(option_label).rstrip(". ")
+    warranty_url = f"{base_url}/warranty"
     admin_html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
       <div style="background:#1B2A4A;padding:20px;text-align:center"><span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:1px">RE<span style="color:#E8943A">DRY</span></span></div>
       <div style="padding:28px;background:#fff;border:1px solid #e2e8f0">
-        <h2 style="color:#16a34a;margin-top:0">&#10003; Proposal Accepted</h2>
+        <h2 style="color:#16a34a;margin-top:0">&#10003; Proposal Signed</h2>
         <table style="font-size:14px;line-height:1.8;border-collapse:collapse;width:100%">
           <tr><td style="font-weight:700;padding-right:16px;white-space:nowrap">Project:</td><td>{project}{f' - {section}' if section else ''}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Client:</td><td>{company}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Signed By:</td><td>{signer}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Date Signed:</td><td>{html_escape(acc.get('date',''))}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Payment Option:</td><td>{option_label}</td></tr>
+          <tr><td style="font-weight:700;padding-right:16px">Preferred Payment:</td><td><strong>{pay_label}</strong> &mdash; invoice separately</td></tr>
+          <tr><td style="font-weight:700;padding-right:16px">Warranty Agreed:</td><td>{'Yes' if sig_proof['warrantyAccepted'] else 'Not recorded'}{f" (rev. {html_escape(str(sig_proof['warrantyVersion']))})" if sig_proof['warrantyVersion'] else ''}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Signed At (UTC):</td><td>{now.strftime('%B %d, %Y at %I:%M %p UTC')}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">IP Address:</td><td style="font-size:12px;color:#64748b">{html_escape(sig_proof['ipAddress'])}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">User Agent:</td><td style="font-size:11px;color:#94a3b8">{html_escape(sig_proof['userAgent'][:120])}</td></tr>
         </table>
-        <div style="margin-top:20px;padding:12px;background:#f8fafc;border-radius:6px;font-size:13px;color:#64748b">The signed proposal PDF is attached. This email serves as confirmation that the above individual electronically accepted this proposal.</div>
+        <div style="margin-top:20px;padding:12px;background:#fef7ed;border:1px solid #E8943A;border-radius:6px;font-size:13px;color:#7c2d12"><strong>Action required:</strong> send the invoice for this signed agreement. The client selected <strong>{pay_label}</strong> and has been told to expect an invoice separately.</div>
+        <div style="margin-top:12px;padding:12px;background:#f8fafc;border-radius:6px;font-size:13px;color:#64748b">The signed proposal PDF is attached. This email serves as confirmation that the above individual electronically accepted this proposal and the <a href="{warranty_url}" style="color:#E8943A">Limited Material Warranty Agreement</a>.</div>
         <div style="margin-top:16px;text-align:center"><a href="{base_url}/proposal/{pid}" style="display:inline-block;background:#E8943A;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:700">View Proposal</a></div>
       </div>
       <div style="padding:16px;text-align:center;font-size:11px;color:#94a3b8">ReDry, LLC | Advancing the Science of Moisture Removal</div>
@@ -1157,21 +1173,34 @@ def accept_proposal(pid):
     if pdf_bytes:
         pdf_name = f"ReDry_Proposal_{project.replace(' ','_')}{'_'+section.replace(' ','_') if section else ''}.pdf"
         attachments.append((pdf_name, pdf_bytes, "application/pdf"))
-    send_email(NOTIFY_EMAILS, f"Proposal Accepted: {project} | {company}", admin_html, attachments)
+    send_email(NOTIFY_EMAILS, f"Signed: {project} | {company} \u2014 invoice needed", admin_html, attachments)
     if client_email:
+        # Complimentary (hidePricing) proposals never generate an invoice, so
+        # don't promise one. Everyone else is told payment is handled by
+        # separate invoice — nothing was charged at signing.
+        if cfg.get("hidePricing"):
+            billing_block = """
+            <p style="font-size:14px;line-height:1.7;color:#374151">This vent system is provided at no charge as a complimentary service &mdash; there is nothing to pay.</p>"""
+        else:
+            billing_block = f"""
+            <div style="margin-top:16px;padding:14px 16px;background:#f8fafc;border-left:3px solid #E8943A;border-radius:4px">
+              <p style="font-size:14px;line-height:1.7;color:#374151;margin:0 0 6px"><strong>What happens next:</strong> no payment was collected today. We will send an invoice separately for <strong>{option_label_clean}</strong>.</p>
+              <p style="font-size:14px;line-height:1.7;color:#374151;margin:0">Preferred payment method on file: <strong>{pay_label}</strong>. If that changes, just reply to this email.</p>
+            </div>"""
         client_html = f"""
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
           <div style="background:#1B2A4A;padding:20px;text-align:center"><span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:1px">RE<span style="color:#E8943A">DRY</span></span></div>
           <div style="padding:28px;background:#fff;border:1px solid #e2e8f0">
             <h2 style="color:#1B2A4A;margin-top:0">Thank you, {contact or signer}!</h2>
-            <p style="font-size:14px;line-height:1.7;color:#374151">Your signed proposal for <strong>{project}</strong> has been received. A copy is attached for your records.</p>
-            <p style="font-size:14px;line-height:1.7;color:#374151">Selected payment option: <strong>{option_label}</strong></p>
-            <p style="font-size:14px;line-height:1.7;color:#374151">The ReDry team will be in touch shortly to coordinate next steps.</p>
-            <div style="margin-top:16px;text-align:center"><a href="{base_url}/proposal/{pid}" style="display:inline-block;background:#E8943A;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:700">View Your Proposal</a></div>
+            <p style="font-size:14px;line-height:1.7;color:#374151">Your signed agreement for <strong>{project}</strong> has been received and recorded. A copy of the signed agreement is attached for your files.</p>
+            {billing_block}
+            <p style="font-size:14px;line-height:1.7;color:#374151">Your agreement includes the ReDry <a href="{warranty_url}" style="color:#E8943A">Limited Material Warranty Agreement</a>, which you can review or print at any time.</p>
+            <p style="font-size:14px;line-height:1.7;color:#374151">The ReDry team will be in touch shortly to coordinate scheduling and next steps.</p>
+            <div style="margin-top:16px;text-align:center"><a href="{base_url}/proposal/{pid}" style="display:inline-block;background:#E8943A;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:700">View Your Agreement</a></div>
           </div>
           <div style="padding:16px;text-align:center;font-size:11px;color:#94a3b8">ReDry, LLC | Advancing the Science of Moisture Removal</div>
         </div>"""
-        send_email([client_email], f"Your Signed ReDry Proposal: {project}", client_html, attachments)
+        send_email([client_email], f"Your Signed ReDry Agreement: {project}", client_html, attachments)
     return jsonify({"status": "accepted", "acceptedAt": now.isoformat()})
 
 # ─── Stripe Checkout ───

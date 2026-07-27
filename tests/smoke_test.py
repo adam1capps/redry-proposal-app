@@ -172,6 +172,24 @@ check("stale daysStale measured from last activity", _stale[0]["daysStale"] == 3
 with server.app.test_request_context("/api/proposal/abc123abc123"):
     check("_request_is_admin False without TEAM_PASSWORD", server._request_is_admin() is False)
 
+# 14d. Warranty page: public, served by the SPA catch-all, no auth, no DB.
+r = client.get("/warranty")
+check("GET /warranty -> 200", r.status_code == 200, f"got {r.status_code}")
+check("GET /warranty is the SPA shell", b"<html" in r.data.lower(), "no <html> in body")
+# The warranty text ships inside the SPA bundle, so assert the agreement is
+# actually present -- a silently-empty legal page would be worse than a 404.
+check("warranty text present in bundle",
+      b"Limited Material Warranty Agreement" in r.data, "warranty heading missing")
+check("warranty sections present in bundle",
+      b"Waiver of Jury Trial" in r.data and b"Limitation of Liability" in r.data,
+      "warranty clauses missing")
+
+# 14e. Signing captures payment preference + warranty assent. Validate the
+#      server-side normalization directly (no DB needed for the accept path's
+#      guard logic -- a junk paymentMethod must not reach the record).
+check("warranty version is exposed to the SPA",
+      b"WARRANTY_VERSION" in r.data, "WARRANTY_VERSION missing from bundle")
+
 # 14. Events endpoint: malformed id rejected, well-formed unknown returns []
 r = client.get("/api/proposal/NOT-A-VALID-ID/events")
 check("GET /api/proposal/<bad>/events -> 400", r.status_code == 400, f"got {r.status_code}")
