@@ -81,11 +81,11 @@ function LeaseTypeSelector({onSelect, onSearch, onDashboard, onLogout}) {
     boxShadow: hovered ? "0 4px 20px rgba(232,148,58,0.15)" : "0 1px 3px rgba(0,0,0,0.04)"
   });
   return (<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg}}>
-    <div style={{width:"100%",maxWidth:860,padding:"0 20px"}}>
+    <div style={{width:"100%",maxWidth:1180,padding:"0 20px"}}>
       <div style={{textAlign:"center",marginBottom:32}}>
         <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>ReDry</div>
         <h1 style={{fontSize:28,fontWeight:800,color:C.navy,margin:"0 0 8px",fontFamily:"'Playfair Display',serif"}}>Proposal Builder</h1>
-        <p style={{color:C.gray,fontSize:14}}>Select a lease type to get started.</p>
+        <p style={{color:C.gray,fontSize:14}}>Choose what you’re quoting to get started.</p>
       </div>
       <div style={{display:"flex",gap:24,flexWrap:"wrap",justifyContent:"center"}}>
         <div style={card("performance", hover==="performance")} onMouseEnter={()=>setHover("performance")} onMouseLeave={()=>setHover(null)} onClick={()=>onSelect("performance")}>
@@ -97,6 +97,11 @@ function LeaseTypeSelector({onSelect, onSearch, onDashboard, onLogout}) {
           <div style={{fontSize:32,marginBottom:12}}>&#9878;</div>
           <h2 style={{fontSize:18,fontWeight:800,color:C.navy,margin:"0 0 8px"}}>Fixed Lease</h2>
           <p style={{fontSize:13,color:C.gray,lineHeight:1.6,margin:0}}>Rent individual vents at a fixed rate. Adjustable pricing and lease term.</p>
+        </div>
+        <div style={card("roofmri", hover==="roofmri")} onMouseEnter={()=>setHover("roofmri")} onMouseLeave={()=>setHover(null)} onClick={()=>onSelect("roofmri")}>
+          <div style={{fontSize:32,marginBottom:12}}>&#128269;</div>
+          <h2 style={{fontSize:18,fontWeight:800,color:C.navy,margin:"0 0 8px"}}>Roof MRI Scan</h2>
+          <p style={{fontSize:13,color:C.gray,lineHeight:1.6,margin:0}}>Moisture scan priced per roof. $4,000 under 100k SF, $6,000 to 200k SF. Multiple addresses supported.</p>
         </div>
       </div>
       <div style={{textAlign:"center",marginTop:24,display:"flex",gap:12,justifyContent:"center"}}>
@@ -258,6 +263,63 @@ const defaultFixedForm = {
   proposalDate: new Date().toISOString().split("T")[0], validDays:"30",
   taxRate:""
 };
+// ─── Roof MRI Scan defaults & content ───
+// Every process claim below is sourced from ReDry field-training recordings.
+// Two wordings are deliberate: "non-destructive" is scoped to the SCANNING
+// phase, and the pin-probe step is disclosed as "minimally invasive" because
+// it penetrates the membrane and is sealed afterward. Never write
+// the un-hyphenated "invasive"-negation, any "zero penetrations" phrasing, or
+// an absolute "100%" qualifier on non-destructive. A smoke check enforces this.
+const MRI_TIER_1_MAX_SF = 100000, MRI_TIER_2_MAX_SF = 200000;
+const MRI_TIER_1_PRICE = 4000, MRI_TIER_2_PRICE = 6000;
+const mriBaseline = sf => { const n = parseFloat(sf) || 0;
+  if (n <= 0) return 0; if (n < MRI_TIER_1_MAX_SF) return MRI_TIER_1_PRICE;
+  if (n <= MRI_TIER_2_MAX_SF) return MRI_TIER_2_PRICE; return 0; };
+const mriLinePrice = row => { const o = String(row.price ?? "").trim();
+  return o !== "" ? (parseFloat(o) || 0) : mriBaseline(row.sf); };
+const mriTotals = form => {
+  const rows = form.scanAddresses || [];
+  return { subtotal: rows.reduce((a, r) => a + mriLinePrice(r), 0),
+           totalSF: rows.reduce((a, r) => a + (parseFloat(r.sf) || 0), 0) };
+};
+const MRI_EXAMPLE_REPORT = "https://roof-mri.com/downloads/example-report-college-gravel-bur.pdf";
+const MRI_LEARN_MORE = "https://discover.roof-mri.com";
+const MRI_PROCESS = [
+  ["Scope confirmation and scheduling", "We confirm roof area, membrane and deck type, number of roof sections, access method, known hazards, rooftop equipment, and your on-site contact. The scan window is set against the weather forecast, because the one environmental requirement is a dry roof surface."],
+  ["Georeferenced grid preparation", "Before anyone sets foot on the roof we build a 10\u2032 \u00d7 10\u2032 measurement grid tied to aerial imagery with compass orientation, so every reading has a fixed, repeatable coordinate."],
+  ["Instrument verification", "On arrival the meter is checked against its calibration reference and must read within factory parameters. This is what makes your results comparable to a scan run by any other qualified operator \u2014 rather than one technician\u2019s opinion."],
+  ["Site baseline and calibration", "We establish a floor reading for your building, then calibrate to insulation on your roof that is confirmed wet rather than to dry material. Calibrating to confirmed-wet material produces a readable gradient instead of a binary wet-or-dry answer, which is what lets us report how wet an area is \u2014 not merely whether it is wet."],
+  ["Full-area scan \u2014 non-destructive", "A rolling impedance scanner is walked over the entire low-slope area on the grid, at roughly 35,000 square feet per hour, in a single trip to the roof. During this phase the membrane is not cut, cored, or opened."],
+  ["Minimally invasive physical confirmation", "Scanner indications are confirmed physically, on the roof. At each calibration location an insulated pin probe \u2014 which reads only at its tip, so moisture can be isolated by depth through the assembly \u2014 takes a direct subsurface reading. Each small penetration is sealed with silicone sealant on completion. More than 99% of the assessed roof area is never penetrated, and no cores are cut. This is what makes the findings physically verified rather than inferred."],
+  ["Analysis", "Grid data, membrane type, insulation depth and stack, deck type, sensitivity level, floor reading, calibration reading, and every probe reading are recorded and analyzed together."],
+  ["Report delivery", "You receive a color-coded moisture map on the 10\u2032 \u00d7 10\u2032 grid; wet, damp, dry and undetermined areas each quantified in square feet and as a percentage of roof area; a per-section breakdown; calibration and equipment documentation; and stated methods and limitations."],
+  ["Recommendations and remediation options", "The report closes with a moisture analysis and a recommended path \u2014 spot replacement, re-cover, targeted drying, or full replacement."],
+];
+const MRI_TERMS = [
+  ["Scope of Inspection", "The methods employed for this inspection do not allow for the complete and exhaustive investigation of the condition that might affect the roofing system. The findings are based on observable moisture levels at the time of inspection only and are limited to the specific areas where testing was conducted."],
+  ["No Diagnostic Claims", "This report does not serve as a diagnostic tool for structural or other deficiencies that may exist in the roofing system. It should not be used as a sole basis for any repair or maintenance decisions. ReDry LLC does not claim that this report identifies all potential areas of moisture or related concerns within the roofing system."],
+  ["Recommendation for Further Testing", "If this report is to be used for the purposes of repair, renovation, or other decision-making processes, it is strongly recommended that further detailed evaluation be conducted by a qualified professional specializing in moisture diagnostics and roofing systems. This may include destructive testing methods or other diagnostic techniques not employed in this inspection."],
+  ["Authorization for Physical Confirmation", "Client authorizes ReDry to make small pin-probe penetrations of the roof membrane at calibration locations for the purpose of physically confirming subsurface moisture, and to seal each penetration with silicone sealant on completion. No cores are cut."],
+  ["Roof Access and Site Conditions", "Client shall provide accurate roof square footage, disclose known roof conditions, prior repairs, leak history, hazardous materials and rooftop equipment, confirm the roof is safe for foot traffic, and provide a designated on-site contact at the scheduled time. If ReDry arrives on site and discovers materially different conditions \u2014 significantly larger roof area, or dangerous access \u2014 ReDry reserves the right to decline the inspection or adjust the fees."],
+  ["Weather", "Scanning requires a dry roof surface. ReDry may delay or reschedule field activities due to unsafe conditions, including inclement weather."],
+  ["Payment", "Payment is due in full prior to the inspection. Scheduling is confirmed on receipt of payment; ReDry will not mobilize to the roof before the invoice is settled."],
+  ["Limitation of Liability", "ReDry LLC shall not be liable for any errors, omissions, or inaccuracies in the findings as presented in the report. ReDry LLC disclaims liability for any direct, indirect, incidental, or consequential damages arising from the use of the report for any purpose beyond its intended informational use. Use of the report constitutes acceptance of the conditions and limitations outlined herein."],
+];
+const blankScanAddress = () => ({address:"",city:"",state:"",zip:"",sf:"",price:""});
+const defaultMriForm = {
+  leaseType:"roofmri",
+  clientCompany:"", clientContact:"", clientTitle:"", clientPhone:"", clientEmail:"",
+  projectName:"", projectSection:"",
+  scanAddresses:[blankScanAddress()],
+  roofAccess:"onsite", accessNotes:"", knownHazards:"",
+  siteContactName:"", siteContactPhone:"",
+  includeRedryBid:true,
+  proposalDate: new Date().toISOString().split("T")[0], validDays:"30", taxRate:"",
+};
+const LS_MRI_FORM = "redry_mri_form";
+const loadMriForm = () => { try { const s=localStorage.getItem(LS_MRI_FORM); return s ? {...defaultMriForm,..._stripFormJunk(JSON.parse(s)), proposalDate:new Date().toISOString().split("T")[0]} : defaultMriForm; } catch(e){ return defaultMriForm; }};
+const saveMriForm = f => { try { localStorage.setItem(LS_MRI_FORM, JSON.stringify(_stripFormJunk({...f}))); } catch(e){} };
+
 const LS_FIXED_FORM = "redry_fixed_form";
 const LS_FIXED_PRESETS = "redry_fixed_presets";
 const loadFixedForm = () => { try { const s=localStorage.getItem(LS_FIXED_FORM); return s ? {...defaultFixedForm,..._stripFormJunk(JSON.parse(s)), proposalDate:new Date().toISOString().split("T")[0]} : defaultFixedForm; } catch(e){ return defaultFixedForm; }};
@@ -1693,6 +1755,362 @@ function PipelinePanel({analytics}) {
   );
 }
 
+// ─── ROOF MRI BUILDER ───
+function RoofMRIBuilder({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,onSearch,onDashboard,onBack}) {
+  const resultRef = useRef();
+  useEffect(()=>{ saveMriForm(form); },[form]);
+  useEffect(()=>{ if(result && resultRef.current) resultRef.current.scrollIntoView({behavior:"smooth",block:"nearest"}); },[result]);
+  const s = k => v => setForm(f=>({...f,[k]:v}));
+  const rows = form.scanAddresses || [];
+  const files = Array.isArray(ventMapFile) ? ventMapFile : [];
+  const setRow = (i,patch) => setForm(f=>{ const a=[...(f.scanAddresses||[])]; a[i]={...a[i],...patch}; return {...f,scanAddresses:a}; });
+  const addRow = () => setForm(f=>({...f,scanAddresses:[...(f.scanAddresses||[]),blankScanAddress()]}));
+  const delRow = i => { setForm(f=>{ const a=[...(f.scanAddresses||[])]; a.splice(i,1); return {...f,scanAddresses:a.length?a:[blankScanAddress()]}; });
+                        setVentMapFile(prev=>{ const a=[...(Array.isArray(prev)?prev:[])]; a.splice(i,1); return a; }); };
+  const setFile = (i,file) => setVentMapFile(prev=>{ const a=[...(Array.isArray(prev)?prev:[])]; while(a.length<=i) a.push(null); a[i]=file; return a; });
+  const totals = mriTotals(form);
+  const ok = form.clientCompany && form.projectName && totals.subtotal > 0;
+  const doClear = () => { if(confirm("Clear all fields?")){ setForm({...defaultMriForm, scanAddresses:[blankScanAddress()], proposalDate:new Date().toISOString().split("T")[0]}); setVentMapFile([]); onSetResult(null);} };
+
+  return (<div style={{maxWidth:900,margin:"0 auto"}}>
+    <div style={{textAlign:"center",marginBottom:20}}>
+      <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>ReDry</div>
+      <h1 style={{fontSize:28,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>Roof MRI Scan</h1>
+      <p style={{color:C.gray,fontSize:14,marginTop:6}}>Moisture scan priced per roof. Add every address in the engagement.</p>
+      <div style={{marginTop:10,display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
+        <button onClick={onBack} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy}}>&larr; Back</button>
+        <button onClick={onSearch} style={{background:"none",border:"none",color:C.gray,fontSize:13,cursor:"pointer",textDecoration:"underline"}}>Past Proposals</button>
+        <button onClick={onDashboard} style={{background:"none",border:"none",color:C.gray,fontSize:13,cursor:"pointer",textDecoration:"underline"}}>Dashboard</button>
+        <button onClick={doClear} style={{background:"none",border:"none",color:C.red,fontSize:13,cursor:"pointer",textDecoration:"underline"}}>Clear Form</button>
+      </div>
+    </div>
+
+    <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:28,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+      <SecLabel>Client Information</SecLabel>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}><Inp label="Company Name" value={form.clientCompany} onChange={s("clientCompany")} placeholder="L.D. Tebben Company" required autoComplete="organization"/></div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+        <Inp label="Contact Name" value={form.clientContact} onChange={s("clientContact")} placeholder="Justin Boren" half autoComplete="name"/>
+        <Inp label="Title" value={form.clientTitle} onChange={s("clientTitle")} placeholder="Facilities Director" half autoComplete="organization-title"/>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
+        <Inp label="Phone" value={form.clientPhone} onChange={s("clientPhone")} placeholder="(512) 663-9226" half autoComplete="tel"/>
+        <Inp label="Email" value={form.clientEmail} onChange={s("clientEmail")} placeholder="jboren@ldtebben.com" half autoComplete="email"/>
+      </div>
+
+      <SecLabel>Engagement</SecLabel>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+        <Inp label="Project / Portfolio Name" value={form.projectName} onChange={s("projectName")} placeholder="Austin ISD - East Campus Portfolio" required half/>
+        <Inp label="Section / Area (optional)" value={form.projectSection} onChange={s("projectSection")} placeholder="Buildings A-C" half/>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
+        <Inp label="Proposal Date" value={form.proposalDate} onChange={s("proposalDate")} type="date" half/>
+        <Inp label="Valid Days" value={form.validDays} onChange={s("validDays")} suffix="days" type="number" half/>
+      </div>
+
+      <SecLabel>Roofs to Scan</SecLabel>
+      <p style={{fontSize:12,color:C.gray,margin:"0 0 12px",lineHeight:1.5}}>
+        Each roof is priced on its own area &mdash; {fmtC(MRI_TIER_1_PRICE)} under {fmtN(MRI_TIER_1_MAX_SF)} SF, {fmtC(MRI_TIER_2_PRICE)} up to {fmtN(MRI_TIER_2_MAX_SF)} SF.
+        Over {fmtN(MRI_TIER_2_MAX_SF)} SF is a custom quote &mdash; enter your own price. You can override any line.
+      </p>
+      {rows.map((row,i)=>{
+        const baseline = mriBaseline(row.sf);
+        const overridden = String(row.price ?? "").trim() !== "";
+        const effective = mriLinePrice(row);
+        const sfNum = parseFloat(row.sf)||0;
+        return (<div key={i} style={{border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 18px",marginBottom:12,background:"#fcfcfd"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <span style={{fontSize:12,fontWeight:700,color:C.navy,textTransform:"uppercase",letterSpacing:0.5}}>Roof {i+1}</span>
+            {rows.length>1 && <button onClick={()=>delRow(i)} style={{background:"none",border:"none",color:C.red,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Remove</button>}
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+            <AddressAutocomplete value={row.address} onChange={v=>setRow(i,{address:v})} placeholder="5601 Menchaca Rd"
+              onPlaceSelect={({address,city,state,zip})=>setRow(i,{address,city,state,zip})}/>
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+            <Inp label="City" value={row.city} onChange={v=>setRow(i,{city:v})} placeholder="Austin" third autoComplete="address-level2"/>
+            <Inp label="State" value={row.state} onChange={v=>setRow(i,{state:v})} placeholder="TX" third autoComplete="address-level1"/>
+            <Inp label="ZIP" value={row.zip} onChange={v=>setRow(i,{zip:v})} placeholder="78745" third autoComplete="postal-code"/>
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-start"}}>
+            <Inp label="Total Roof Area" value={row.sf} onChange={v=>setRow(i,{sf:v})} placeholder="58000" suffix="SF" type="number" half/>
+            <Inp label="Scan Fee" value={overridden?row.price:(baseline?String(baseline):"")} onChange={v=>setRow(i,{price:v})}
+                 prefix="$" type="number" half placeholder={baseline?String(baseline):"Custom quote"}/>
+          </div>
+          <div style={{fontSize:12,marginTop:4,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+            {sfNum>0 && baseline>0 && !overridden && <span style={{color:C.green}}>Auto-priced from {fmtN(sfNum)} SF &rarr; {fmtC(baseline)}</span>}
+            {sfNum>MRI_TIER_2_MAX_SF && <span style={{color:C.orange,fontWeight:600}}>Over {fmtN(MRI_TIER_2_MAX_SF)} SF &mdash; enter a custom price</span>}
+            {overridden && baseline>0 && effective!==baseline && <span style={{color:C.orange}}>Overriding standard {fmtC(baseline)}</span>}
+            {overridden && <button onClick={()=>setRow(i,{price:""})} style={{background:"none",border:"none",color:C.gray,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Reset to standard</button>}
+          </div>
+          <div style={{marginTop:12,paddingTop:12,borderTop:`1px dashed ${C.border}`}}>
+            <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Overhead image of this address</label>
+            <input type="file" accept="image/*" onChange={e=>setFile(i, e.target.files[0]||null)}
+              style={{fontSize:12,color:C.gray}}/>
+            {files[i] && <div style={{fontSize:12,color:C.green,marginTop:4}}>&#10003; {files[i].name}</div>}
+          </div>
+        </div>);
+      })}
+      <button onClick={addRow} style={{padding:"8px 16px",border:`1px dashed ${C.orange}`,borderRadius:6,background:"#fff",color:C.orange,fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Add another address</button>
+
+      <div style={{marginTop:16,background:"#f8fafc",borderRadius:8,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+        <span style={{fontSize:13,color:C.gray}}>{rows.length} roof{rows.length===1?"":"s"} &middot; {fmtN(totals.totalSF)} SF total</span>
+        <span style={{fontSize:20,fontWeight:800,color:C.navy}}>{fmtC(totals.subtotal)}</span>
+      </div>
+
+      <SecLabel>Roof Access</SecLabel>
+      {[["onsite","Roof access is provided or already exists on site (roof hatch, fixed ladder, etc.)"],
+        ["redry","ReDry will bring a ladder"]].map(([val,label])=>(
+        <label key={val} style={{display:"flex",gap:10,alignItems:"flex-start",marginBottom:8,cursor:"pointer",fontSize:13,lineHeight:1.6,color:"#374151"}}>
+          <input type="radio" name="roofAccess" checked={form.roofAccess===val} onChange={()=>s("roofAccess")(val)}
+            style={{marginTop:3,width:16,height:16,accentColor:C.orange,flexShrink:0,cursor:"pointer"}}/>
+          <span>{label}</span>
+        </label>
+      ))}
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginTop:8,marginBottom:4}}>
+        <Inp label="On-Site Contact" value={form.siteContactName} onChange={s("siteContactName")} placeholder="Carlos Rivera" half/>
+        <Inp label="On-Site Phone" value={form.siteContactPhone} onChange={s("siteContactPhone")} placeholder="(512) 555-0100" half/>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:4}}>
+        <Inp label="Known Hazards" value={form.knownHazards} onChange={s("knownHazards")} placeholder="Skylights on north bay"/>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
+        <Inp label="Access Notes" value={form.accessNotes} onChange={s("accessNotes")} placeholder="Gate code 1234; check in at front office"/>
+      </div>
+
+      <SecLabel>Options</SecLabel>
+      <label style={{display:"flex",gap:10,alignItems:"flex-start",cursor:"pointer",fontSize:13,lineHeight:1.6,color:"#374151"}}>
+        <input type="checkbox" checked={!!form.includeRedryBid} onChange={e=>s("includeRedryBid")(e.target.checked)}
+          style={{marginTop:3,width:16,height:16,accentColor:C.orange,flexShrink:0,cursor:"pointer"}}/>
+        <span>Offer a ReDry drying bid alongside the report if moisture is found</span>
+      </label>
+    </div>
+
+    <div style={{display:"flex",gap:12,marginTop:20,flexWrap:"wrap"}}>
+      <button onClick={onPDF} disabled={!ok||loading} style={{flex:"1 1 200px",padding:"14px 0",border:`1px solid ${C.navy}`,borderRadius:8,background:"#fff",color:C.navy,fontSize:14,fontWeight:700,cursor:ok&&!loading?"pointer":"not-allowed",opacity:ok&&!loading?1:0.5}}>
+        {loading==="pdf"?"Generating...":"Download PDF"}
+      </button>
+      <button onClick={onLink} disabled={!ok||loading} style={{flex:"1 1 200px",padding:"14px 0",border:"none",borderRadius:8,background:ok&&!loading?C.orange:"#cbd5e1",color:"#fff",fontSize:14,fontWeight:700,cursor:ok&&!loading?"pointer":"not-allowed"}}>
+        {loading==="link"?"Creating...":"Create Client Link"}
+      </button>
+    </div>
+
+    {result && result.type==="link" && <div ref={resultRef} style={{marginTop:20,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:20}}>
+      <div style={{fontSize:14,fontWeight:700,color:"#15803d",marginBottom:10}}>&#10003; Client link ready</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <input readOnly value={`${window.location.origin}${result.clientUrl}`}
+          style={{flex:1,padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,fontFamily:"monospace",color:C.dark,background:"#fff"}}
+          onClick={e=>e.target.select()}/>
+        <button onClick={()=>navigator.clipboard.writeText(`${window.location.origin}${result.clientUrl}`)}
+          style={{padding:"8px 16px",border:`1px solid ${C.border}`,borderRadius:6,background:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",color:C.navy,whiteSpace:"nowrap"}}>Copy</button>
+      </div>
+      <div style={{fontSize:12,color:C.gray,marginTop:6}}>Share this link with your client.
+        <a href={result.clientUrl} target="_blank" rel="noopener" style={{color:C.orange,marginLeft:6,fontWeight:600}}>Preview &#8594;</a>
+      </div>
+      <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
+        {!result.emailSent ? (<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <input value={result.sendEmail||form.clientEmail||""} onChange={e=>onSetResult(r=>({...r,sendEmail:e.target.value}))}
+            placeholder="client@company.com" type="email"
+            style={{flex:"1 1 200px",padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,color:C.dark,background:"#fff",outline:"none"}}/>
+          <button onClick={async()=>{
+            const email = result.sendEmail||form.clientEmail;
+            if(!email){alert("Enter an email address"); return;}
+            onSetResult(r=>({...r,sending:true}));
+            try{
+              const r=await authFetch(`${API}/api/proposal/${result.proposalId}/send`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+              const d=await r.json();
+              if(d.sent) onSetResult(r=>({...r,emailSent:true,sentTo:email,sending:false}));
+              else { alert(d.error||"Failed to send"); onSetResult(r=>({...r,sending:false})); }
+            }catch(e){ alert("Failed to send email"); onSetResult(r=>({...r,sending:false})); }
+          }} disabled={result.sending}
+            style={{padding:"8px 16px",border:"none",borderRadius:6,background:C.orange,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",opacity:result.sending?0.6:1}}>
+            {result.sending?"Sending...":"Send to Client"}
+          </button>
+        </div>) : (<div style={{fontSize:13,color:"#15803d",fontWeight:600}}>&#10003; Sent to {result.sentTo}</div>)}
+      </div>
+    </div>}
+  </div>);
+}
+
+// ─── ROOF MRI CLIENT VIEW ───
+function RoofMRIClientView({form, proposalId, imageUrls}) {
+  const [sigName,setSigName]=useState(""), [sigDate,setSigDate]=useState("");
+  const [termsOk,setTermsOk]=useState(false);
+  const [accepted,setAccepted]=useState(false), [submitting,setSubmitting]=useState(false);
+  const rows = form.scanAddresses || [];
+  const totals = mriTotals(form);
+  const vt = (()=>{ try{ return addDays(form.proposalDate, parseInt(form.validDays)||30); }catch(e){ return ""; } })();
+  const SH=(n,t)=>(<div style={{marginTop:36,marginBottom:12}}><h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>{n}. {t}</h2><div style={{height:2,width:50,background:C.orange,marginTop:6}}/></div>);
+  const P=({children})=>(<p style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"8px 0",textAlign:"justify"}}>{children}</p>);
+
+  const doAccept = async()=>{
+    if(!sigName||!sigDate||!termsOk)return;
+    setSubmitting(true);
+    try{
+      if(proposalId){
+        const r=await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({name:sigName,date:sigDate,selectedOption:1,paymentMethod:null,warrantyAccepted:termsOk,warrantyVersion:"roofmri-scan-tc"})});
+        if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
+        if(!r.ok){ alert("Failed to submit acceptance. Please try again."); setSubmitting(false); return; }
+      }
+      setAccepted(true);
+    }catch(e){ alert("Network error. Please check your connection and try again."); }
+    setSubmitting(false);
+  };
+
+  if(accepted) return (
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{textAlign:"center",maxWidth:560,padding:40}}>
+        <div style={{width:72,height:72,borderRadius:"50%",background:"#dcfce7",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",fontSize:32}}>&#10003;</div>
+        <h1 style={{fontSize:26,fontWeight:800,color:C.navy,fontFamily:"'Playfair Display',serif",marginBottom:8}}>Agreement Signed</h1>
+        <p style={{color:C.gray,fontSize:15,lineHeight:1.6}}>Thank you. Your signature has been recorded and a copy of the signed agreement is on its way to your inbox.</p>
+        <div style={{marginTop:24,padding:16,background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,color:C.gray,textAlign:"left"}}>
+          <div>Signed by: <strong style={{color:C.dark}}>{sigName}</strong></div>
+          <div>Date: <strong style={{color:C.dark}}>{sigDate}</strong></div>
+          <div>Scan total: <strong style={{color:C.dark}}>{fmtC(totals.subtotal)}</strong> &middot; {rows.length} roof{rows.length===1?"":"s"}</div>
+        </div>
+        <div style={{marginTop:20,padding:"16px 18px",background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,textAlign:"left"}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:6}}>What happens next</div>
+          <p style={{fontSize:13,color:C.gray,lineHeight:1.7,margin:0}}>
+            No payment was collected today. <strong style={{color:C.dark}}>You will receive an invoice separately</strong>, and it is
+            due before we get on the roof. Once it is settled we will confirm the scan date against the weather forecast.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (<div style={{minHeight:"100vh",background:C.bg}}>
+    <div style={{background:C.navy,padding:"10px 0"}}>
+      <div style={{maxWidth:820,margin:"0 auto",padding:"0 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{color:"#fff",fontSize:13,fontWeight:600,letterSpacing:1}}>RE<span style={{color:C.orange}}>DRY</span></span>
+        {proposalId && <a href={`${API}/api/proposal/${proposalId}/pdf`} target="_blank" rel="noopener" style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",padding:"5px 14px",borderRadius:4,fontSize:12,textDecoration:"none"}}>PDF</a>}
+      </div>
+    </div>
+    <div style={{maxWidth:820,margin:"0 auto",padding:"32px 20px 60px"}}>
+      <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden",marginBottom:24}}>
+        <div style={{height:4,background:C.orange}}/>
+        <div style={{padding:"28px 32px"}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>Roof MRI Moisture Scan</div>
+          <h1 style={{fontSize:26,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>{form.projectName||"Project"}</h1>
+          <div style={{fontSize:13,color:C.gray,marginTop:6}}>{rows.length} roof{rows.length===1?"":"s"} &middot; {fmtN(totals.totalSF)} SF{vt?` · Valid through ${vt}`:""}</div>
+          <div style={{display:"flex",gap:24,flexWrap:"wrap",marginTop:18}}>
+            <div style={{fontSize:13,color:"#374151",lineHeight:1.7}}><strong style={{color:C.navy}}>FROM</strong><br/>ReDry, LLC<br/>Adam Capps, Founder<br/>865.771.3848<br/>adam@re-dry.com</div>
+            <div style={{fontSize:13,color:"#374151",lineHeight:1.7}}><strong style={{color:C.navy}}>TO</strong><br/>{form.clientCompany}
+              {form.clientContact && <><br/>{form.clientContact}</>}
+              {form.clientTitle && <><br/>{form.clientTitle}</>}
+              {form.clientEmail && <><br/>{form.clientEmail}</>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
+        {SH(1,"What a Roof MRI Scan Is")}
+        <P>A Roof MRI moisture scan quantifies how much water is trapped in your roof assembly, where it is, and how wet it is &mdash; before you spend money on a roof. <strong>We are physically on your roof for this work.</strong> Scanning is <strong>non-destructive</strong>: the membrane is not cut or cored. Subsurface moisture is then confirmed physically with <strong>minimally invasive</strong> pin-probe readings, each sealed with silicone sealant on completion. You end up with a defensible, coordinate-referenced moisture map instead of an estimate.</P>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:14}}>
+          <a href={MRI_EXAMPLE_REPORT} target="_blank" rel="noopener" style={{padding:"9px 18px",border:`1px solid ${C.orange}`,borderRadius:6,color:C.orange,fontSize:13,fontWeight:700,textDecoration:"none"}}>See an example report &rarr;</a>
+          <a href={MRI_LEARN_MORE} target="_blank" rel="noopener" style={{padding:"9px 18px",border:`1px solid ${C.border}`,borderRadius:6,color:C.navy,fontSize:13,fontWeight:600,textDecoration:"none"}}>Learn more about Roof MRI &rarr;</a>
+        </div>
+
+        {SH(2,"Our Process")}
+        {MRI_PROCESS.map(([head,body],i)=>(
+          <p key={head} style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"10px 0",textAlign:"justify"}}>
+            <strong style={{color:C.navy}}>{i+1}. {head}.</strong>&nbsp;&nbsp;{body}
+          </p>
+        ))}
+
+        {SH(3,"Scope and Investment")}
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginTop:8}}>
+            <thead><tr>
+              <th style={{background:C.navy,color:"#fff",padding:"8px 12px",textAlign:"left",fontWeight:600}}>Address</th>
+              <th style={{background:C.navy,color:"#fff",padding:"8px 12px",textAlign:"right",fontWeight:600}}>Roof Area</th>
+              <th style={{background:C.navy,color:"#fff",padding:"8px 12px",textAlign:"right",fontWeight:600}}>Scan Fee</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r,i)=>{
+                const addr=[r.address,r.city,r.state,r.zip].filter(Boolean).join(", ");
+                return (<tr key={i} style={{background:i%2===0?"#f8fafc":"#fff"}}>
+                  <td style={{padding:"8px 12px",color:"#374151"}}>{addr||"(address pending)"}</td>
+                  <td style={{padding:"8px 12px",textAlign:"right",color:"#374151"}}>{r.sf?`${fmtN(parseFloat(r.sf)||0)} SF`:"—"}</td>
+                  <td style={{padding:"8px 12px",textAlign:"right",color:"#374151"}}>{fmtC(mriLinePrice(r))}</td>
+                </tr>);
+              })}
+              <tr style={{background:"#f1f5f9"}}>
+                <td style={{padding:"10px 12px",fontWeight:800,color:C.navy,borderTop:`2px solid ${C.border}`}}>Total</td>
+                <td style={{padding:"10px 12px",textAlign:"right",fontWeight:800,color:C.navy,borderTop:`2px solid ${C.border}`}}>{fmtN(totals.totalSF)} SF</td>
+                <td style={{padding:"10px 12px",textAlign:"right",fontWeight:800,color:C.navy,borderTop:`2px solid ${C.border}`}}>{fmtC(totals.subtotal)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p style={{fontSize:12,color:C.gray,marginTop:10,lineHeight:1.6}}>Scan fees are flat per roof, based on roof area &mdash; not a per-square-foot rate. Nothing is charged here: once this agreement is signed we invoice separately, and <strong>payment is due before we get on the roof.</strong></p>
+
+        {form.includeRedryBid !== false && <>
+          {SH(4,"If the Roof Is Wet")}
+          <P>A scan that finds moisture does not automatically mean tear-off. ReDry manufactures a solar-powered vent system that dries trapped moisture out of the insulation in place, without removing the membrane. Because the scan quantifies the wet area in square feet, it is exactly the input a drying scope needs &mdash; and <strong>on request we will provide a ReDry drying proposal alongside your report at no additional cost.</strong> Drying is an option, not an obligation, and it is quoted separately.</P>
+        </>}
+
+        {SH(form.includeRedryBid!==false?5:4,"Roof Access")}
+        <P>{form.roofAccess==="redry"
+          ? "ReDry will bring a ladder and provide its own roof access."
+          : "Roof access is to be provided or already exists on site (roof hatch, fixed ladder, or similar). Please make that access available at the scheduled time."}</P>
+        {(form.siteContactName||form.siteContactPhone||form.knownHazards||form.accessNotes) && (
+          <div style={{background:"#f8fafc",borderRadius:8,padding:"12px 16px",marginTop:8,fontSize:13,lineHeight:1.8,color:"#374151"}}>
+            {form.siteContactName && <div><strong style={{color:C.navy}}>On-site contact:</strong> {form.siteContactName}{form.siteContactPhone?` · ${form.siteContactPhone}`:""}</div>}
+            {form.knownHazards && <div><strong style={{color:C.navy}}>Known hazards:</strong> {form.knownHazards}</div>}
+            {form.accessNotes && <div><strong style={{color:C.navy}}>Access notes:</strong> {form.accessNotes}</div>}
+          </div>
+        )}
+
+        {SH(form.includeRedryBid!==false?6:5,"Terms and Conditions")}
+        {MRI_TERMS.map(([head,body],i)=>(
+          <p key={head} style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"10px 0",textAlign:"justify"}}>
+            <strong style={{color:C.navy}}>{(form.includeRedryBid!==false?6:5)}.{i+1} {head}.</strong>&nbsp;&nbsp;{body}
+          </p>
+        ))}
+      </div>
+
+      {(imageUrls||[]).length>0 && <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
+        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Exhibit A: Roof Overheads</h2>
+        <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
+        {(imageUrls||[]).map((u,i)=>(
+          <div key={i} style={{marginBottom:18}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.navy,marginBottom:6}}>A-{i+1}. {[rows[i]?.address,rows[i]?.city].filter(Boolean).join(", ")||`Roof ${i+1}`}</div>
+            <img src={u} alt={`Overhead ${i+1}`} style={{width:"100%",borderRadius:8,border:`1px solid ${C.border}`}}/>
+          </div>
+        ))}
+      </div>}
+
+      <div style={{background:"#fff",borderRadius:12,border:`2px solid ${C.orange}`,padding:"28px 32px"}}>
+        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Sign and Accept</h2>
+        <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
+        <P>By signing below you authorize the Roof MRI moisture scan described above for <strong>{fmtC(totals.subtotal)}</strong> and agree to the Terms and Conditions, including authorization for the minimally invasive pin-probe confirmation described in those terms.</P>
+        <div style={{display:"flex",gap:16,marginTop:20,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:200}}>
+            <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Full Name / Title</label>
+            <input value={sigName} onChange={e=>setSigName(e.target.value)} placeholder="Jane Smith, Facilities Director" autoComplete="name" style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
+          </div>
+          <div style={{flex:1,minWidth:200}}>
+            <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Date</label>
+            <input type="date" value={sigDate} onChange={e=>setSigDate(e.target.value)} style={{width:"100%",padding:"10px 14px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:14,color:C.dark,outline:"none",boxSizing:"border-box"}}/>
+          </div>
+        </div>
+        <label style={{display:"flex",gap:10,alignItems:"flex-start",marginTop:16,cursor:"pointer",fontSize:13,lineHeight:1.6,color:"#374151"}}>
+          <input type="checkbox" checked={termsOk} onChange={e=>setTermsOk(e.target.checked)} style={{marginTop:3,width:16,height:16,accentColor:C.orange,flexShrink:0,cursor:"pointer"}}/>
+          <span>I have read and agree to the Terms and Conditions above, and I authorize the pin-probe confirmation described in them.</span>
+        </label>
+        <button onClick={doAccept} disabled={!sigName||!sigDate||!termsOk||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&termsOk&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&termsOk&&!submitting?"pointer":"not-allowed"}}>
+          {submitting?"Submitting...":"Sign and Accept Agreement"}
+        </button>
+        <div style={{marginTop:10,fontSize:12,color:C.gray,textAlign:"center",lineHeight:1.6}}>
+          No payment is collected now. We&rsquo;ll email you a copy of the signed agreement and invoice you separately &mdash; payment is due before we get on the roof.
+        </div>
+      </div>
+    </div>
+  </div>);
+}
+
 // ─── DASHBOARD ───
 function EventTimeline({pid}) {
   const [events, setEvents] = useState(null);
@@ -2010,16 +2428,20 @@ function App() {
   const [leaseType,setLeaseType] = useState(null);
   const [form,setForm] = useState(loadForm);
   const [fixedForm,setFixedForm] = useState(loadFixedForm);
+  const [mriForm,setMriForm] = useState(loadMriForm);
   const [ventMapFile,setVentMapFile] = useState(null);
   const [ventMapUrl,setVentMapUrl] = useState(null);
+  const [mriImageUrls,setMriImageUrls] = useState([]);
   const [loading,setLoading] = useState(null);
   const [result,setResult] = useState(null);
   const [proposalId,setProposalId] = useState(null);
   const [taxRate,setTaxRate] = useState(0);
   const [authed,setAuthed] = useState(false);
 
-  const activeForm = leaseType === "fixed" ? fixedForm : form;
-  const setActiveForm = leaseType === "fixed" ? setFixedForm : setForm;
+  // Keyed lookup rather than nested ternaries; `performance` stays the
+  // default so legacy rows with no leaseType keep working.
+  const FORMS = {fixed:[fixedForm,setFixedForm], roofmri:[mriForm,setMriForm], performance:[form,setForm]};
+  const [activeForm, setActiveForm] = FORMS[leaseType] || FORMS.performance;
 
   useEffect(()=>{
     const path = window.location.pathname;
@@ -2037,7 +2459,10 @@ function App() {
         if(cfg.error) throw new Error(cfg.error);
         const ventFile = cfg._ventMapFilename;
         delete cfg._ventMapFilename; delete cfg._createdAt;
-        if(cfg.leaseType === "fixed") {
+        if(cfg.leaseType === "roofmri") {
+          setLeaseType("roofmri");
+          setMriForm(f=>({...f,...cfg}));
+        } else if(cfg.leaseType === "fixed") {
           setLeaseType("fixed");
           setFixedForm(f=>({...f,...cfg}));
         } else {
@@ -2045,6 +2470,10 @@ function App() {
           setForm(f=>({...f,...cfg}));
         }
         if(ventFile) setVentMapUrl(`${API}/api/proposal/${id}/ventmap`);
+        if(cfg.leaseType === "roofmri") {
+          const n = (cfg.scanAddresses||[]).length;
+          setMriImageUrls(Array.from({length:n},(_,i)=>`${API}/api/proposal/${id}/ventmap/${i}`));
+        }
         setAuthed(true);
         setView("client");
       }).catch(()=>{setView("not-found");});
@@ -2057,7 +2486,14 @@ function App() {
   },[]);
 
   useEffect(()=>{
-    if(ventMapFile){const u=URL.createObjectURL(ventMapFile);setVentMapUrl(u);return()=>URL.revokeObjectURL(u);}
+    // Roof MRI keeps an ARRAY here (one overhead per address) and previews
+    // each image inside its own row, so only build a single-file preview URL
+    // for the lease builders. Passing an array to createObjectURL throws and
+    // would blank the entire app via the ErrorBoundary.
+    if(ventMapFile instanceof Blob){
+      const u=URL.createObjectURL(ventMapFile);setVentMapUrl(u);
+      return()=>URL.revokeObjectURL(u);
+    }
   },[ventMapFile]);
 
   const doLogout=()=>{
@@ -2071,12 +2507,25 @@ function App() {
     const cfg={...activeForm, taxRate:String(taxRate), leaseType: leaseType || "performance"};
     delete cfg.taxRateOverride;
     fd.append("config",JSON.stringify(cfg));
-    if(ventMapFile)fd.append("ventMap",ventMapFile);
+    // Roof MRI carries one overhead per address, so ventMapFile may be an
+    // array. The server reads request.files.getlist("ventMap") either way.
+    if(Array.isArray(ventMapFile)) ventMapFile.forEach(f=>{ if(f) fd.append("ventMap",f); });
+    else if(ventMapFile) fd.append("ventMap",ventMapFile);
     return fd;
   };
 
   const validateForm=()=>{
-    if(leaseType!=="fixed" && activeForm.showCustomOption){
+    if(leaseType==="roofmri"){
+      const rows=activeForm.scanAddresses||[];
+      if(!rows.length || !rows.some(r=>String(r.address||"").trim())){
+        alert("Add at least one address to scan."); return false;
+      }
+      if(mriTotals(activeForm).subtotal<=0){
+        alert("Enter square footage (or a custom price) so the scan can be priced."); return false;
+      }
+      return true;
+    }
+    if(leaseType==="performance" && activeForm.showCustomOption){
       const t=(activeForm.customOptionPayments||[]).reduce((s,p)=>s+(parseFloat(p.pct)||0),0);
       if(t!==100){alert(`Custom option payment percentages must equal 100% (currently ${t}%).`);return false;}
     }
@@ -2119,6 +2568,7 @@ function App() {
   if(view==="login") return <LoginScreen onLogin={()=>{setAuthed(true);setView("lease-select");}}/>;
   if(view==="lease-select") return <LeaseTypeSelector onSelect={(type)=>{setLeaseType(type);setResult(null);setView("form");}} onSearch={()=>setView("search")} onDashboard={()=>setView("dashboard")} onLogout={doLogout}/>;
   if(view==="client") {
+    if(leaseType==="roofmri") return <RoofMRIClientView form={mriForm} proposalId={proposalId} imageUrls={mriImageUrls}/>;
     if(leaseType==="fixed") return <FixedLeaseClientView form={fixedForm} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
     return <ClientView form={form} ventMapUrl={ventMapUrl} proposalId={proposalId} onBack={null}/>;
   }
@@ -2136,7 +2586,10 @@ function App() {
       if(cfg && cfg.error) throw new Error(cfg.error);
       const ventFile = cfg._ventMapFilename;
       delete cfg._ventMapFilename; delete cfg._createdAt; delete cfg.error;
-      if(cfg.leaseType === "fixed") {
+      if(cfg.leaseType === "roofmri") {
+        setLeaseType("roofmri");
+        setMriForm(f=>({...f,...cfg}));
+      } else if(cfg.leaseType === "fixed") {
         setLeaseType("fixed");
         setFixedForm(f=>({...f,...cfg}));
       } else {
@@ -2153,6 +2606,7 @@ function App() {
       setView("form");
     }).catch(()=>alert("Failed to load proposal."));
   }}/></div>);
+  if(leaseType==="roofmri") return (<div style={{padding:"40px 20px"}}><RoofMRIBuilder form={mriForm} setForm={setMriForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} onSetResult={setResult} onSearch={()=>setView("search")} onDashboard={()=>setView("dashboard")} onBack={()=>setView("lease-select")}/></div>);
   if(leaseType==="fixed") return (<div style={{padding:"40px 20px"}}><FixedLeaseBuilder form={fixedForm} setForm={setFixedForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} onSetResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate} onSearch={()=>setView("search")} onDashboard={()=>setView("dashboard")} onBack={()=>setView("lease-select")}/></div>);
   return (<div style={{padding:"40px 20px"}}><BuilderForm form={form} setForm={setForm} ventMapFile={ventMapFile} setVentMapFile={setVentMapFile} onPDF={doPDF} onLink={doLink} loading={loading} result={result} onSetResult={setResult} taxRate={taxRate} setTaxRate={setTaxRate} onSearch={()=>setView("search")} onDashboard={()=>setView("dashboard")} onBack={()=>setView("lease-select")}/></div>);
 }

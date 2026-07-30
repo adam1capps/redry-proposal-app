@@ -1934,3 +1934,329 @@ if __name__ == "__main__":
     with open(output_path, "wb") as f:
         f.write(pdf_bytes)
     print(f"Test PDF generated: {output_path} ({len(pdf_bytes)} bytes)")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ROOF MRI SCAN
+# ─────────────────────────────────────────────────────────────────────────────
+# Content note: every process claim below is sourced from ReDry field-training
+# recordings and the published Roof MRI report terms. Two wordings are
+# deliberate and must not be "improved":
+#   - "non-destructive" is scoped to the SCANNING phase only.
+#   - pin-probe confirmation is "minimally invasive" and is disclosed, because
+#     it penetrates the membrane and is sealed with silicone sealant.
+# Never negate "invasive" outright, never claim zero penetrations, and never
+# put an absolute "100%" qualifier on non-destructive.
+# No ASTM conformance, insurance, patent, or PHD band claims appear here --
+# none of those are verifiable from source material.
+
+MRI_TIER_1_MAX_SF = 100000
+MRI_TIER_2_MAX_SF = 200000
+MRI_TIER_1_PRICE = 4000.0
+MRI_TIER_2_PRICE = 6000.0
+
+MRI_PROCESS = [
+    ("Scope confirmation and scheduling",
+     "We confirm roof area, membrane and deck type, number of roof sections, access method, known "
+     "hazards, rooftop equipment, and your on-site contact. The scan window is set against the "
+     "weather forecast, because the one environmental requirement is a dry roof surface."),
+    ("Georeferenced grid preparation",
+     "Before anyone sets foot on the roof we build a 10&#39; &times; 10&#39; measurement grid tied to aerial "
+     "imagery with compass orientation, so every reading has a fixed, repeatable coordinate."),
+    ("Instrument verification",
+     "On arrival the meter is checked against its calibration reference and must read within factory "
+     "parameters. This is what makes your results comparable to a scan run by any other qualified "
+     "operator, rather than one technician&#39;s opinion."),
+    ("Site baseline and calibration",
+     "We establish a floor reading for your building, then calibrate to insulation on your roof that is "
+     "confirmed wet rather than to dry material. Calibrating to confirmed-wet material produces a "
+     "readable gradient instead of a binary wet-or-dry answer &mdash; which is what lets us report how wet "
+     "an area is, not merely whether it is wet."),
+    ("Full-area scan &mdash; non-destructive",
+     "A rolling impedance scanner is walked over the entire low-slope area on the grid, at roughly "
+     "35,000 square feet per hour, in a single trip to the roof. During this phase the membrane is "
+     "not cut, cored, or opened."),
+    ("Minimally invasive physical confirmation",
+     "Scanner indications are confirmed physically on the roof. At each calibration location an "
+     "insulated pin probe &mdash; which reads only at its tip, so moisture can be isolated by depth through "
+     "the assembly &mdash; takes a direct subsurface reading. Each small penetration is sealed with silicone "
+     "sealant on completion. More than 99% of the assessed roof area is never penetrated, and no cores "
+     "are cut. This step is what makes the findings physically verified rather than inferred."),
+    ("Analysis",
+     "Grid data, membrane type, insulation depth and stack, deck type, sensitivity level, floor reading, "
+     "calibration reading, and every probe reading are recorded and analyzed together."),
+    ("Report delivery",
+     "You receive a color-coded moisture map on the 10&#39; &times; 10&#39; grid; wet, damp, dry and undetermined "
+     "areas each quantified in square feet and as a percentage of roof area; a per-section breakdown; "
+     "calibration and equipment documentation; and stated methods and limitations."),
+    ("Recommendations and remediation options",
+     "The report closes with a moisture analysis and a recommended path &mdash; spot replacement, re-cover, "
+     "targeted drying, or full replacement."),
+]
+
+MRI_TERMS = [
+    ("Scope of Inspection",
+     "The methods employed for this inspection do not allow for the complete and exhaustive investigation "
+     "of the condition that might affect the roofing system. The findings are based on observable moisture "
+     "levels at the time of inspection only and are limited to the specific areas where testing was conducted."),
+    ("No Diagnostic Claims",
+     "This report does not serve as a diagnostic tool for structural or other deficiencies that may exist in "
+     "the roofing system. It should not be used as a sole basis for any repair or maintenance decisions. "
+     "ReDry LLC does not claim that this report identifies all potential areas of moisture or related concerns "
+     "within the roofing system."),
+    ("Recommendation for Further Testing",
+     "If this report is to be used for the purposes of repair, renovation, or other decision-making processes, "
+     "it is strongly recommended that further detailed evaluation be conducted by a qualified professional "
+     "specializing in moisture diagnostics and roofing systems. This may include destructive testing methods "
+     "or other diagnostic techniques not employed in this inspection."),
+    ("Authorization for Physical Confirmation",
+     "Client authorizes ReDry to make small pin-probe penetrations of the roof membrane at calibration "
+     "locations for the purpose of physically confirming subsurface moisture, and to seal each penetration "
+     "with silicone sealant on completion. No cores are cut."),
+    ("Roof Access and Site Conditions",
+     "Client shall provide accurate roof square footage, disclose known roof conditions, prior repairs, leak "
+     "history, hazardous materials and rooftop equipment, confirm the roof is safe for foot traffic, and "
+     "provide a designated on-site contact at the scheduled time. If ReDry arrives on site and discovers "
+     "materially different conditions &mdash; significantly larger roof area, or dangerous access &mdash; ReDry "
+     "reserves the right to decline the inspection or adjust the fees."),
+    ("Weather",
+     "Scanning requires a dry roof surface. ReDry may delay or reschedule field activities due to unsafe "
+     "conditions, including inclement weather."),
+    ("Payment",
+     "Payment is due in full prior to the inspection. Scheduling is confirmed on receipt of payment; ReDry "
+     "will not mobilize to the roof before the invoice is settled."),
+    ("Limitation of Liability",
+     "ReDry LLC shall not be liable for any errors, omissions, or inaccuracies in the findings as presented "
+     "in the report. ReDry LLC disclaims liability for any direct, indirect, incidental, or consequential "
+     "damages arising from the use of the report for any purpose beyond its intended informational use. "
+     "Use of the report constitutes acceptance of the conditions and limitations outlined herein."),
+]
+
+
+def _mri_pdf_lines(config):
+    """Per-address pricing lines. Mirrors server.mri_totals so the PDF and the
+    app can never disagree about the money."""
+    lines, subtotal, total_sf = [], 0.0, 0.0
+    for row in (config.get("scanAddresses") or []):
+        if not isinstance(row, dict):
+            continue
+        sf = safe_float(row.get("sf", 0) or 0)
+        if sf <= 0:
+            baseline = 0.0
+        elif sf < MRI_TIER_1_MAX_SF:
+            baseline = MRI_TIER_1_PRICE
+        elif sf <= MRI_TIER_2_MAX_SF:
+            baseline = MRI_TIER_2_PRICE
+        else:
+            baseline = 0.0
+        override = str(row.get("price", "") or "").strip()
+        price = safe_float(override, 0) if override else baseline
+        addr = ", ".join([str(row.get(k, "") or "").strip()
+                          for k in ("address", "city", "state", "zip")
+                          if str(row.get(k, "") or "").strip()]) or "(address pending)"
+        lines.append((addr, sf, price))
+        subtotal += price
+        total_sf += sf
+    return lines, round(subtotal, 2), total_sf
+
+
+def _mri_build(config, logo_path, image_paths, client_facing):
+    client_company = config.get("clientCompany", "")
+    client_contact = config.get("clientContact", "")
+    client_title = config.get("clientTitle", "")
+    client_phone = config.get("clientPhone", "")
+    client_email = config.get("clientEmail", "")
+    project_name = config.get("projectName", "Project")
+    proposal_date_str = config.get("proposalDate", datetime.now().strftime("%Y-%m-%d"))
+    valid_days = safe_int(config.get("validDays", 30), 30)
+
+    lines, subtotal, total_sf = _mri_pdf_lines(config)
+
+    proposal_date = safe_parse_date(proposal_date_str)
+    proposal_date_display = proposal_date.strftime("%B %d, %Y").replace(" 0", " ")
+    valid_through = (proposal_date + timedelta(days=valid_days)).strftime("%B %d, %Y").replace(" 0", " ")
+    proposal_num = f"P-{proposal_date.year}-{proposal_date.strftime('%m')}{proposal_date.strftime('%d')}"
+
+    to_lines = [x for x in (client_company, client_contact, client_title, client_phone, client_email) if x]
+    to_text = "<br/>".join(to_lines) if to_lines else "[Client]"
+
+    buf = io.BytesIO()
+
+    class MriDoc(BaseDocTemplate):
+        def __init__(self, filename, **kwargs):
+            super().__init__(filename, **kwargs)
+            frame = Frame(MARGIN_L, MARGIN_B, PAGE_W - MARGIN_L - MARGIN_R,
+                          PAGE_H - MARGIN_T - MARGIN_B, id='normal')
+            self.addPageTemplates([PageTemplate(id='main', frames=frame, onPage=self._draw_page)])
+
+        def _draw_page(self, c, doc):
+            c.saveState()
+            c.setStrokeColor(ORANGE); c.setLineWidth(3)
+            c.line(0, PAGE_H - 4, PAGE_W, PAGE_H - 4)
+            if logo_path and os.path.exists(logo_path):
+                from PIL import Image as PILImage
+                iw, ih = PILImage.open(logo_path).size
+                w = 0.7 * inch
+                c.drawImage(logo_path, MARGIN_L, 0.28 * inch, width=w, height=w * (ih / iw),
+                            mask='auto', preserveAspectRatio=True)
+            c.setFont("Helvetica", 7.5); c.setFillColor(MED_GRAY)
+            c.drawCentredString(PAGE_W / 2, 0.4 * inch,
+                                "ReDry, LLC  |  re-dry.com  |  info@re-dry.com  |  Confidential and Proprietary")
+            c.drawRightString(PAGE_W - MARGIN_R, 0.4 * inch, f"Page {doc.page}")
+            c.restoreState()
+
+    title = f"Roof MRI Scan - {project_name}"
+    doc = MriDoc(buf, pagesize=letter, leftMargin=MARGIN_L, rightMargin=MARGIN_R,
+                 topMargin=MARGIN_T, bottomMargin=MARGIN_B, title=title, author="ReDry, LLC")
+    story = []
+    uw = PAGE_W - MARGIN_L - MARGIN_R
+
+    if logo_path and os.path.exists(logo_path):
+        from PIL import Image as PILImage
+        iw, ih = PILImage.open(logo_path).size
+        logo_img = Image(logo_path, width=2.4 * inch, height=2.4 * inch * (ih / iw))
+        hdr = Table([[logo_img, Paragraph(
+            f"Proposal No: {proposal_num}<br/>Date: {proposal_date_display}<br/>Valid Through: {valid_through}",
+            ParagraphStyle('HR', parent=style_small, alignment=TA_RIGHT, fontSize=9,
+                           leading=13, textColor=MED_GRAY))]],
+            colWidths=[uw * 0.6, uw * 0.4])
+        hdr.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                                 ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                                 ('RIGHTPADDING', (0, 0), (-1, -1), 0)]))
+        story.append(hdr); story.append(Spacer(1, 6))
+
+    story.append(Paragraph("ROOF MRI MOISTURE SCAN" if not client_facing else "ROOF MRI MOISTURE SCAN",
+                           style_title))
+    story.append(orange_rule()); story.append(Spacer(1, 4))
+    story.append(Paragraph(project_name, style_subtitle))
+    story.append(Spacer(1, 10))
+
+    ft = Table([[Paragraph("<b>FROM</b><br/>ReDry, LLC<br/>Adam Capps, Founder<br/>865.771.3848<br/>adam@re-dry.com", style_small),
+                 Paragraph(f"<b>TO</b><br/>{to_text}", style_small)]],
+               colWidths=[uw * 0.5, uw * 0.5])
+    ft.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 0)]))
+    story.append(ft); story.append(Spacer(1, 14))
+
+    # 1. What a Roof MRI scan is
+    story.append(Paragraph("1. What a Roof MRI Scan Is", style_section_head))
+    story.append(orange_rule()); story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        "A Roof MRI moisture scan quantifies how much water is trapped in your roof assembly, where it is, "
+        "and how wet it is &mdash; before you spend money on a roof. We are physically on the roof for this work. "
+        "Scanning is non-destructive: the membrane is not cut or cored. Subsurface moisture is then confirmed "
+        "physically with minimally invasive pin-probe readings, each sealed with silicone sealant on completion. "
+        "You end up with a defensible, coordinate-referenced moisture map instead of an estimate.", style_body))
+    story.append(Spacer(1, 10))
+
+    # 2. Process
+    story.append(Paragraph("2. Our Process", style_section_head))
+    story.append(orange_rule()); story.append(Spacer(1, 6))
+    for i, (head, body) in enumerate(MRI_PROCESS, start=1):
+        story.append(Paragraph(f"<b>{i}. {head}.</b> {body}", style_body))
+        story.append(Spacer(1, 4))
+    story.append(Spacer(1, 8))
+
+    # 3. Scope / pricing
+    if not client_facing:
+        story.append(Paragraph("3. Scope and Investment", style_section_head))
+        story.append(orange_rule()); story.append(Spacer(1, 6))
+        data = [[Paragraph("<b>Address</b>", style_table_header),
+                 Paragraph("<b>Roof Area</b>", style_table_header),
+                 Paragraph("<b>Scan Fee</b>", style_table_header)]]
+        for addr, sf, price in lines:
+            data.append([Paragraph(addr, style_table_cell),
+                         Paragraph(f"{sf:,.0f} SF" if sf else "&mdash;", style_table_cell_right),
+                         Paragraph(fmt_currency(price), style_table_cell_right)])
+        data.append([Paragraph("<b>Total</b>", style_table_cell_bold),
+                     Paragraph(f"<b>{total_sf:,.0f} SF</b>", style_table_cell_bold_right),
+                     Paragraph(f"<b>{fmt_currency(subtotal)}</b>", style_table_cell_bold_right)])
+        t = Table(data, colWidths=[uw * 0.56, uw * 0.2, uw * 0.24])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), NAVY),
+            ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
+            ('GRID', (0, 0), (-1, -1), 0.5, BORDER_GRAY),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, -1), (-1, -1), LIGHT_GRAY),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(t); story.append(Spacer(1, 6))
+        story.append(Paragraph(
+            "Scan fees are flat per roof, based on roof area &mdash; not a per-square-foot rate. "
+            "Payment is due prior to the inspection.", style_small))
+        story.append(Spacer(1, 10))
+
+    # 4. Drying option
+    story.append(Paragraph(("4." if not client_facing else "3.") + " If the Roof Is Wet", style_section_head))
+    story.append(orange_rule()); story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        "A scan that finds moisture does not automatically mean tear-off. ReDry manufactures a solar-powered "
+        "vent system that dries trapped moisture out of the insulation in place, without removing the membrane. "
+        "Because the scan quantifies the wet area in square feet, it is the input a drying scope needs &mdash; and on "
+        "request we will provide a ReDry drying proposal alongside your report, at no additional cost. "
+        "Drying is an option, not an obligation, and it is quoted separately.", style_body))
+    story.append(Spacer(1, 10))
+
+    # 5. Access
+    access = config.get("roofAccess", "")
+    access_line = {
+        "redry": "ReDry will bring a ladder and provide its own roof access.",
+        "onsite": "Roof access is to be provided or already exists on site (roof hatch, fixed ladder, or "
+                  "similar). Client is responsible for making that access available at the scheduled time.",
+    }.get(access)
+    if access_line:
+        story.append(Paragraph(("5." if not client_facing else "4.") + " Roof Access", style_section_head))
+        story.append(orange_rule()); story.append(Spacer(1, 6))
+        story.append(Paragraph(access_line, style_body))
+        for label, key in (("Known hazards", "knownHazards"),
+                           ("On-site contact", "siteContactName"),
+                           ("On-site phone", "siteContactPhone"),
+                           ("Access notes", "accessNotes")):
+            val = str(config.get(key, "") or "").strip()
+            if val:
+                story.append(Paragraph(f"<b>{label}:</b> {val}", style_small))
+        story.append(Spacer(1, 10))
+
+    # Terms
+    story.append(PageBreak())
+    story.append(Paragraph("Terms and Conditions", style_section_head))
+    story.append(orange_rule()); story.append(Spacer(1, 6))
+    for head, body in MRI_TERMS:
+        story.append(Paragraph(f"<b>{head}.</b> {body}", style_body))
+        story.append(Spacer(1, 4))
+
+    # Exhibits: one overhead per address
+    for idx, path in enumerate(image_paths or [], start=1):
+        if not path or not os.path.exists(path):
+            continue
+        story.append(PageBreak())
+        label = lines[idx - 1][0] if idx - 1 < len(lines) else ""
+        story.append(Paragraph(f"Exhibit A-{idx}: Overhead &mdash; {label}" if label
+                               else f"Exhibit A-{idx}: Overhead", style_section_head))
+        story.append(orange_rule()); story.append(Spacer(1, 8))
+        try:
+            from PIL import Image as PILImage
+            iw, ih = PILImage.open(path).size
+            aspect = ih / iw
+            max_h = PAGE_H - MARGIN_T - MARGIN_B - 1.5 * inch
+            dw = min(uw, max_h / aspect) if aspect > 0 else uw
+            story.append(Image(path, width=dw, height=dw * aspect))
+        except Exception:
+            story.append(Paragraph("[Overhead image]", style_body))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
+
+def generate_mri_proposal_pdf(config, logo_path=None, vent_map_path=None, vent_map_paths=None):
+    """Full Roof MRI scan proposal, including per-address pricing."""
+    paths = vent_map_paths if vent_map_paths else ([vent_map_path] if vent_map_path else [])
+    return _mri_build(config, logo_path, paths, client_facing=False)
+
+
+def generate_mri_client_pdf(config, logo_path=None, vent_map_path=None, vent_map_paths=None):
+    """Client-facing Roof MRI overview: process and scope, no pricing."""
+    paths = vent_map_paths if vent_map_paths else ([vent_map_path] if vent_map_path else [])
+    return _mri_build(config, logo_path, paths, client_facing=True)
