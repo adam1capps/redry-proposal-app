@@ -239,6 +239,20 @@ check("SPA never claims non-invasive", b"non-invasive" not in _r.data,
       "the word 'non-invasive' is not defensible -- pin probes penetrate the membrane")
 check("SPA never claims no penetrations", b"no penetrations" not in _r.data.lower())
 check("SPA links the example report", b"example-report-college-gravel-bur" in _r.data)
+check("SPA does not link discover.roof-mri.com", b"discover.roof-mri.com" not in _r.data,
+      "owner asked for this link to be removed -- it names another client's project")
+check("SPA states the 72-hour turnaround", b"within 72 hours of scan completion" in _r.data)
+check("PHD expands to Physical, not Precise",
+      b"Precise Hydrology Detection" not in _r.data)
+import proposal_generator as _pg
+_src = open(_pg.__file__, encoding="utf-8").read()
+check("PDF generator uses Physical Hydrology Detection",
+      "Precise Hydrology Detection" not in _src and "Physical Hydrology Detection" in _src)
+check("PDF terms carry the 72-hour commitment",
+      any("72 hours" in body for _h, body in _pg.MRI_TERMS))
+check("Roof MRI applies no sales tax",
+      server.mri_totals({"scanAddresses": [{"sf": "58000"}], "taxRate": "0.0625"})["subtotal"] == 4000.0,
+      "scan fees are a service -- owner confirmed no tax")
 
 # 14. Events endpoint: malformed id rejected, well-formed unknown returns []
 r = client.get("/api/proposal/NOT-A-VALID-ID/events")

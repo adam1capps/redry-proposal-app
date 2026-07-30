@@ -283,7 +283,6 @@ const mriTotals = form => {
            totalSF: rows.reduce((a, r) => a + (parseFloat(r.sf) || 0), 0) };
 };
 const MRI_EXAMPLE_REPORT = "https://roof-mri.com/downloads/example-report-college-gravel-bur.pdf";
-const MRI_LEARN_MORE = "https://discover.roof-mri.com";
 const MRI_PROCESS = [
   ["Scope confirmation and scheduling", "We confirm roof area, membrane and deck type, number of roof sections, access method, known hazards, rooftop equipment, and your on-site contact. The scan window is set against the weather forecast, because the one environmental requirement is a dry roof surface."],
   ["Georeferenced grid preparation", "Before anyone sets foot on the roof we build a 10\u2032 \u00d7 10\u2032 measurement grid tied to aerial imagery with compass orientation, so every reading has a fixed, repeatable coordinate."],
@@ -292,7 +291,7 @@ const MRI_PROCESS = [
   ["Full-area scan \u2014 non-destructive", "A rolling impedance scanner is walked over the entire low-slope area on the grid, at roughly 35,000 square feet per hour, in a single trip to the roof. During this phase the membrane is not cut, cored, or opened."],
   ["Minimally invasive physical confirmation", "Scanner indications are confirmed physically, on the roof. At each calibration location an insulated pin probe \u2014 which reads only at its tip, so moisture can be isolated by depth through the assembly \u2014 takes a direct subsurface reading. Each small penetration is sealed with silicone sealant on completion. More than 99% of the assessed roof area is never penetrated, and no cores are cut. This is what makes the findings physically verified rather than inferred."],
   ["Analysis", "Grid data, membrane type, insulation depth and stack, deck type, sensitivity level, floor reading, calibration reading, and every probe reading are recorded and analyzed together."],
-  ["Report delivery", "You receive a color-coded moisture map on the 10\u2032 \u00d7 10\u2032 grid; wet, damp, dry and undetermined areas each quantified in square feet and as a percentage of roof area; a per-section breakdown; calibration and equipment documentation; and stated methods and limitations."],
+  ["Report delivery", "Your report is delivered within 72 hours of scan completion. You receive a color-coded moisture map on the 10\u2032 \u00d7 10\u2032 grid; wet, damp, dry and undetermined areas each quantified in square feet and as a percentage of roof area; a per-section breakdown; calibration and equipment documentation; and stated methods and limitations."],
   ["Recommendations and remediation options", "The report closes with a moisture analysis and a recommended path \u2014 spot replacement, re-cover, targeted drying, or full replacement."],
 ];
 const MRI_TERMS = [
@@ -301,6 +300,7 @@ const MRI_TERMS = [
   ["Recommendation for Further Testing", "If this report is to be used for the purposes of repair, renovation, or other decision-making processes, it is strongly recommended that further detailed evaluation be conducted by a qualified professional specializing in moisture diagnostics and roofing systems. This may include destructive testing methods or other diagnostic techniques not employed in this inspection."],
   ["Authorization for Physical Confirmation", "Client authorizes ReDry to make small pin-probe penetrations of the roof membrane at calibration locations for the purpose of physically confirming subsurface moisture, and to seal each penetration with silicone sealant on completion. No cores are cut."],
   ["Roof Access and Site Conditions", "Client shall provide accurate roof square footage, disclose known roof conditions, prior repairs, leak history, hazardous materials and rooftop equipment, confirm the roof is safe for foot traffic, and provide a designated on-site contact at the scheduled time. If ReDry arrives on site and discovers materially different conditions \u2014 significantly larger roof area, or dangerous access \u2014 ReDry reserves the right to decline the inspection or adjust the fees."],
+  ["Report Delivery", "ReDry will deliver the moisture report within 72 hours of completing the scan."],
   ["Weather", "Scanning requires a dry roof surface. ReDry may delay or reschedule field activities due to unsafe conditions, including inclement weather."],
   ["Payment", "Payment is due in full prior to the inspection. Scheduling is confirmed on receipt of payment; ReDry will not mobilize to the roof before the invoice is settled."],
   ["Limitation of Liability", "ReDry LLC shall not be liable for any errors, omissions, or inaccuracies in the findings as presented in the report. ReDry LLC disclaims liability for any direct, indirect, incidental, or consequential damages arising from the use of the report for any purpose beyond its intended informational use. Use of the report constitutes acceptance of the conditions and limitations outlined herein."],
@@ -2009,7 +2009,6 @@ function RoofMRIClientView({form, proposalId, imageUrls}) {
         <P>A Roof MRI moisture scan quantifies how much water is trapped in your roof assembly, where it is, and how wet it is &mdash; before you spend money on a roof. <strong>We are physically on your roof for this work.</strong> Scanning is <strong>non-destructive</strong>: the membrane is not cut or cored. Subsurface moisture is then confirmed physically with <strong>minimally invasive</strong> pin-probe readings, each sealed with silicone sealant on completion. You end up with a defensible, coordinate-referenced moisture map instead of an estimate.</P>
         <div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:14}}>
           <a href={MRI_EXAMPLE_REPORT} target="_blank" rel="noopener" style={{padding:"9px 18px",border:`1px solid ${C.orange}`,borderRadius:6,color:C.orange,fontSize:13,fontWeight:700,textDecoration:"none"}}>See an example report &rarr;</a>
-          <a href={MRI_LEARN_MORE} target="_blank" rel="noopener" style={{padding:"9px 18px",border:`1px solid ${C.border}`,borderRadius:6,color:C.navy,fontSize:13,fontWeight:600,textDecoration:"none"}}>Learn more about Roof MRI &rarr;</a>
         </div>
 
         {SH(2,"Our Process")}

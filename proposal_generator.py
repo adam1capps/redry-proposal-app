@@ -454,7 +454,7 @@ def generate_proposal_pdf(config, logo_path=None, vent_map_path=None):
     story.append(Paragraph(
         "The ReDry Vents remain the property of ReDry, LLC throughout the lease period. ReDry will retrieve "
         "the vent heads once the insulation in the area served by each vent is confirmed to have reached an "
-        "acceptable moisture reading as measured by the Roof MRI PHD (Precise Hydrology Detection) scale. "
+        "acceptable moisture reading as measured by the Roof MRI PHD (Physical Hydrology Detection) scale. "
         "Drying performance is evaluated using the following criteria:",
         style_body
     ))
@@ -1239,7 +1239,7 @@ def generate_client_pdf(config, logo_path=None, vent_map_path=None):
     story.append(Spacer(1, 4))
     story.append(Paragraph("4. PERFORMANCE CRITERIA", style_section_head))
     story.append(Paragraph(
-        "Drying performance is evaluated using the Roof MRI PHD (Precise Hydrology Detection) scale. "
+        "Drying performance is evaluated using the Roof MRI PHD (Physical Hydrology Detection) scale. "
         "The ReDry Vents remain in place and continue operating until the insulation in each vent's service "
         'area reaches an acceptable "Dry" threshold:',
         style_body
@@ -1986,7 +1986,7 @@ MRI_PROCESS = [
      "Grid data, membrane type, insulation depth and stack, deck type, sensitivity level, floor reading, "
      "calibration reading, and every probe reading are recorded and analyzed together."),
     ("Report delivery",
-     "You receive a color-coded moisture map on the 10&#39; &times; 10&#39; grid; wet, damp, dry and undetermined "
+     "Your report is delivered within 72 hours of scan completion. You receive a color-coded moisture map on the 10&#39; &times; 10&#39; grid; wet, damp, dry and undetermined "
      "areas each quantified in square feet and as a percentage of roof area; a per-section breakdown; "
      "calibration and equipment documentation; and stated methods and limitations."),
     ("Recommendations and remediation options",
@@ -2019,6 +2019,8 @@ MRI_TERMS = [
      "provide a designated on-site contact at the scheduled time. If ReDry arrives on site and discovers "
      "materially different conditions &mdash; significantly larger roof area, or dangerous access &mdash; ReDry "
      "reserves the right to decline the inspection or adjust the fees."),
+    ("Report Delivery",
+     "ReDry will deliver the moisture report within 72 hours of completing the scan."),
     ("Weather",
      "Scanning requires a dry roof surface. ReDry may delay or reschedule field activities due to unsafe "
      "conditions, including inclement weather."),
