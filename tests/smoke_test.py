@@ -190,6 +190,70 @@ check("warranty sections present in bundle",
 check("warranty version is exposed to the SPA",
       b"WARRANTY_VERSION" in r.data, "WARRANTY_VERSION missing from bundle")
 
+# 15. Roof MRI scan: pricing tiers, per-address sum, and override behavior.
+check("mri tier under 100k", server.mri_baseline_price(58000) == 4000.0)
+check("mri tier boundary at 100k is the 6k tier", server.mri_baseline_price(100000) == 6000.0)
+check("mri tier 200k inclusive", server.mri_baseline_price(200000) == 6000.0)
+check("mri over 200k is custom (0 baseline)", server.mri_baseline_price(200001) == 0.0)
+check("mri garbage sf is 0", server.mri_baseline_price("abc") == 0.0)
+_mri = {"leaseType": "roofmri", "scanAddresses": [
+    {"address": "A", "sf": "58000", "price": ""},
+    {"address": "B", "sf": "145000", "price": ""},
+    {"address": "C", "sf": "240000", "price": "9500"}]}
+check("mri per-address sum with override", server.proposal_value(_mri) == 19500.0,
+      f"got {server.proposal_value(_mri)}")
+check("mri totalSF sums", server.mri_totals(_mri)["totalSF"] == 443000.0)
+check("mri empty is 0", server.proposal_value({"leaseType": "roofmri"}) == 0.0)
+check("mri hidePricing is 0",
+      server.proposal_value({"leaseType": "roofmri", "hidePricing": True,
+                             "scanAddresses": [{"sf": "58000"}]}) == 0.0)
+check("mri garbage row tolerated",
+      server.proposal_value({"leaseType": "roofmri",
+                             "scanAddresses": [{"sf": "x", "price": "y"}, "notadict"]}) == 0.0)
+
+# 16. Roof MRI config keys survive the whitelist (silently dropped = invisible bug).
+_cfg = {"leaseType": "roofmri", "scanAddresses": [{"address": "A", "sf": "1"}],
+        "roofAccess": "redry", "knownHazards": "skylights", "siteContactName": "Carlos",
+        "siteContactPhone": "555", "accessNotes": "gate 1234", "includeRedryBid": True,
+        "reportDays": "5", "bogusKey": "drop me"}
+server._sanitize_incoming_config(_cfg)
+for k in ("scanAddresses", "roofAccess", "knownHazards", "siteContactName",
+          "siteContactPhone", "accessNotes", "includeRedryBid", "reportDays"):
+    check(f"sanitize keeps '{k}'", k in _cfg, f"{k} was dropped")
+check("sanitize drops bogus roofmri sibling", "bogusKey" not in _cfg)
+check("scanAddresses rows survive intact", _cfg["scanAddresses"][0]["sf"] == "1")
+
+# 17. The Roof MRI PDF generators import and produce a PDF with no DB.
+_pdf = server.generate_mri_proposal_pdf(_mri)
+check("mri proposal pdf generated", _pdf[:4] == b"%PDF" and len(_pdf) > 2000, f"got {len(_pdf)} bytes")
+_cpdf = server.generate_mri_client_pdf(_mri)
+check("mri client pdf generated", _cpdf[:4] == b"%PDF" and len(_cpdf) > 2000)
+
+# 18. SPA carries the Roof MRI path and the approved wording. A babel syntax
+#     error would blank the whole app, so assert on rendered bundle content.
+_r = client.get("/")
+check("SPA has Roof MRI Scan option", b"Roof MRI Scan" in _r.data)
+check("SPA uses non-destructive wording", b"non-destructive" in _r.data)
+check("SPA uses minimally invasive wording", b"minimally invasive" in _r.data)
+check("SPA never claims non-invasive", b"non-invasive" not in _r.data,
+      "the word 'non-invasive' is not defensible -- pin probes penetrate the membrane")
+check("SPA never claims no penetrations", b"no penetrations" not in _r.data.lower())
+check("SPA links the example report", b"example-report-college-gravel-bur" in _r.data)
+check("SPA does not link discover.roof-mri.com", b"discover.roof-mri.com" not in _r.data,
+      "owner asked for this link to be removed -- it names another client's project")
+check("SPA states the 72-hour turnaround", b"within 72 hours of scan completion" in _r.data)
+check("PHD expands to Physical, not Precise",
+      b"Precise Hydrology Detection" not in _r.data)
+import proposal_generator as _pg
+_src = open(_pg.__file__, encoding="utf-8").read()
+check("PDF generator uses Physical Hydrology Detection",
+      "Precise Hydrology Detection" not in _src and "Physical Hydrology Detection" in _src)
+check("PDF terms carry the 72-hour commitment",
+      any("72 hours" in body for _h, body in _pg.MRI_TERMS))
+check("Roof MRI applies no sales tax",
+      server.mri_totals({"scanAddresses": [{"sf": "58000"}], "taxRate": "0.0625"})["subtotal"] == 4000.0,
+      "scan fees are a service -- owner confirmed no tax")
+
 # 14. Events endpoint: malformed id rejected, well-formed unknown returns []
 r = client.get("/api/proposal/NOT-A-VALID-ID/events")
 check("GET /api/proposal/<bad>/events -> 400", r.status_code == 400, f"got {r.status_code}")

@@ -7,7 +7,8 @@ PostgreSQL storage, Stripe payments, SendGrid emails, proposal lifecycle trackin
 from flask import Flask, request, jsonify, send_file, send_from_directory, session
 from flask_cors import CORS
 from proposal_generator import (generate_proposal_pdf, generate_client_pdf,
-    generate_fixed_proposal_pdf, generate_fixed_client_pdf, safe_float, safe_int)
+    generate_fixed_proposal_pdf, generate_fixed_client_pdf,
+    generate_mri_proposal_pdf, generate_mri_client_pdf, safe_float, safe_int)
 import os, io, json, uuid, stripe, traceback, psycopg2, psycopg2.extras, hashlib, secrets, functools, hmac, re
 from datetime import datetime, timezone, timedelta
 try:
@@ -156,6 +157,20 @@ def init_db():
             # full-scans proposal_events.
             _exec_ignore_dup(cur, """CREATE INDEX IF NOT EXISTS proposal_events_pid_type
                 ON proposal_events(proposal_id, event_type)""")
+            # A Roof MRI proposal can cover several addresses, each with its
+            # own overhead image, so one BYTEA column on `proposals` no longer
+            # suffices. Images are NOT stored in the config JSONB: /api/analytics
+            # re-scans every config across 23 time windows on each dashboard
+            # load, and photos there would drag every image ever uploaded
+            # through Postgres. The legacy vent_map_bytes column is kept and
+            # still written for single-image proposals; the read path prefers
+            # this table and falls back, so no backfill is required.
+            _exec_ignore_dup(cur, """CREATE TABLE IF NOT EXISTS proposal_images (
+                id SERIAL PRIMARY KEY, proposal_id TEXT REFERENCES proposals(id),
+                sort_order INT NOT NULL DEFAULT 0, label TEXT, filename TEXT,
+                mime_type TEXT, image_bytes BYTEA, created_at TIMESTAMPTZ DEFAULT NOW())""")
+            _exec_ignore_dup(cur, """CREATE INDEX IF NOT EXISTS proposal_images_pid
+                ON proposal_images(proposal_id, sort_order)""")
             conn.close()
             _INIT_DB_OK = True
             _INIT_DB_LAST_ERROR = None
@@ -211,6 +226,41 @@ def db_load_vent_map(pid):
     except Exception as e:
         print(f"DB error (load_vent_map): {e}")
         return (None, None)
+
+def db_store_images(pid, images):
+    """Replace the proposal's image set. `images` is a list of
+    (filename, bytes, mime_type, label). Called only when the operator
+    actually uploaded files, so a regenerate without new uploads preserves
+    what is already stored (same contract as vent_map_bytes)."""
+    if not DATABASE_URL or not images: return
+    try:
+        conn = get_db(); cur = conn.cursor()
+        _exec_ignore_dup(cur, """CREATE TABLE IF NOT EXISTS proposal_images (
+            id SERIAL PRIMARY KEY, proposal_id TEXT REFERENCES proposals(id),
+            sort_order INT NOT NULL DEFAULT 0, label TEXT, filename TEXT,
+            mime_type TEXT, image_bytes BYTEA, created_at TIMESTAMPTZ DEFAULT NOW())""")
+        cur.execute("DELETE FROM proposal_images WHERE proposal_id=%s", (pid,))
+        for i, (fname, fbytes, mime, label) in enumerate(images):
+            cur.execute("""INSERT INTO proposal_images
+                           (proposal_id, sort_order, label, filename, mime_type, image_bytes)
+                           VALUES (%s,%s,%s,%s,%s,%s)""",
+                        (pid, i, label, fname, mime, psycopg2.Binary(fbytes)))
+        conn.close()
+    except Exception as e:
+        print(f"DB error (store_images): {e}")
+
+def db_load_images(pid):
+    """Return [(sort_order, label, filename, mime_type, bytes)] ordered."""
+    if not DATABASE_URL: return []
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("""SELECT sort_order, label, filename, mime_type, image_bytes
+                       FROM proposal_images WHERE proposal_id=%s ORDER BY sort_order""", (pid,))
+        rows = cur.fetchall(); conn.close()
+        return [(r[0], r[1], r[2], r[3], bytes(r[4]) if r[4] is not None else None) for r in rows]
+    except Exception as e:
+        print(f"DB error (load_images): {e}")
+        return []
 
 def db_update_status(pid, status, ts_field=None):
     if not DATABASE_URL: return
@@ -375,14 +425,12 @@ def get_or_regenerate_pdf(pid, client_facing=False):
     logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
     vmap = _ensure_vent_map_file(pid, cfg)
     try:
-        if client_facing:
-            pdf_bytes = (generate_fixed_client_pdf(cfg, logo_path=logo, vent_map_path=vmap)
-                         if lease_type == "fixed"
-                         else generate_client_pdf(cfg, logo_path=logo, vent_map_path=vmap))
+        full_gen, client_gen = PDF_GENERATORS.get(lease_type, PDF_GENERATORS["performance"])
+        gen = client_gen if client_facing else full_gen
+        if lease_type == "roofmri":
+            pdf_bytes = gen(cfg, logo_path=logo, vent_map_paths=_ensure_image_files(pid, cfg))
         else:
-            pdf_bytes = (generate_fixed_proposal_pdf(cfg, logo_path=logo, vent_map_path=vmap)
-                         if lease_type == "fixed"
-                         else generate_proposal_pdf(cfg, logo_path=logo, vent_map_path=vmap))
+            pdf_bytes = gen(cfg, logo_path=logo, vent_map_path=vmap)
         try:
             with open(p, "wb") as f: f.write(pdf_bytes)
         except Exception: pass
@@ -412,6 +460,35 @@ def _ensure_vent_map_file(pid, cfg):
         print(f"Vent map restore error for {pid}: {e}")
         return None
 
+def _ensure_image_files(pid, cfg):
+    """Materialize every stored overhead image to disk and return the paths in
+    order. Prefers the proposal_images table; falls back to the legacy single
+    vent-map column so pre-existing proposals keep rendering Exhibit A."""
+    paths = []
+    for order, label, fname, mime, data in db_load_images(pid):
+        if not data:
+            continue
+        safe = secure_filename(fname or f"{pid}_img{order}.png")
+        target = os.path.join(PROPOSALS_DIR, f"{pid}_{order}_{safe}")
+        try:
+            if not os.path.exists(target):
+                with open(target, "wb") as f: f.write(data)
+            paths.append(target)
+        except Exception as e:
+            print(f"Image restore error for {pid} #{order}: {e}")
+    if paths:
+        return paths
+    # No DB rows (or no database at all): fall back to the filenames recorded
+    # in config, which still exist on disk until the next redeploy.
+    for fname in (cfg.get("_overheadFiles") or []):
+        cand = os.path.join(PROPOSALS_DIR, secure_filename(fname))
+        if os.path.exists(cand):
+            paths.append(cand)
+    if paths:
+        return paths
+    legacy = _ensure_vent_map_file(pid, cfg)
+    return [legacy] if legacy else []
+
 STATE_TAX_RATES = {
     "AL": 0.04, "AK": 0.00, "AZ": 0.056, "AR": 0.065, "CA": 0.0725,
     "CO": 0.029, "CT": 0.0635, "DE": 0.00, "FL": 0.06, "GA": 0.04,
@@ -425,6 +502,65 @@ STATE_TAX_RATES = {
     "VA": 0.053, "WA": 0.065, "WV": 0.06, "WI": 0.05, "WY": 0.04, "DC": 0.06
 }
 OPTION_LABELS = {1: "Pay in Full", 2: "50% Now. 50% at Install.", 3: "Let\u2019s Get Going!"}
+LEASE_TYPE_LABELS = {"performance": "Performance Lease", "fixed": "Fixed Lease", "roofmri": "Roof MRI Scan"}
+# (full_proposal_generator, client_facing_generator) keyed by leaseType. Adding
+# a type here is the single place the PDF layer needs to learn about it.
+PDF_GENERATORS = {
+    "performance": (generate_proposal_pdf, generate_client_pdf),
+    "fixed": (generate_fixed_proposal_pdf, generate_fixed_client_pdf),
+    "roofmri": (generate_mri_proposal_pdf, generate_mri_client_pdf),
+}
+
+# \u2500\u2500\u2500 Roof MRI Scan pricing \u2500\u2500\u2500
+# Flat fee per roof, by area. Verified against the 07-09-2026 field training:
+# under 100k SF = $4,000; 100k-200k SF = $6,000; over 200k = custom quote.
+# Deliberately NOT a per-square-foot rate. A proposal may cover several
+# addresses; each address is priced on its own area and the totals are summed,
+# with the operator free to override any line.
+MRI_TIER_1_MAX_SF = 100000
+MRI_TIER_2_MAX_SF = 200000
+MRI_TIER_1_PRICE = 4000.0
+MRI_TIER_2_PRICE = 6000.0
+
+def mri_baseline_price(sf):
+    """Suggested flat fee for one roof of `sf` square feet. Returns 0.0 for
+    areas over the published tiers (custom quote) and for missing/garbage
+    input, so a blank line never invents revenue."""
+    sf = safe_float(sf, 0)
+    if sf <= 0:
+        return 0.0
+    if sf < MRI_TIER_1_MAX_SF:
+        return MRI_TIER_1_PRICE
+    if sf <= MRI_TIER_2_MAX_SF:
+        return MRI_TIER_2_PRICE
+    return 0.0
+
+def mri_totals(cfg):
+    """Single source of truth for Roof MRI money. Called by proposal_value,
+    the send-proposal email, and the approval email so the three cannot drift.
+
+    Each entry in cfg["scanAddresses"] carries its own square footage and an
+    optional price override; a blank override falls back to the tier baseline.
+    Returns {"lines": [...], "subtotal": float, "totalSF": float}.
+    """
+    lines = []
+    subtotal = 0.0
+    total_sf = 0.0
+    for row in (cfg.get("scanAddresses") or []):
+        if not isinstance(row, dict):
+            continue
+        sf = safe_float(row.get("sf", 0), 0)
+        baseline = mri_baseline_price(sf)
+        override = row.get("price", "")
+        price = safe_float(override, 0) if str(override).strip() != "" else baseline
+        addr = ", ".join([str(row.get(k, "") or "").strip() for k in ("address", "city", "state", "zip")
+                          if str(row.get(k, "") or "").strip()])
+        lines.append({"address": addr or "(address pending)", "sf": sf,
+                      "baseline": baseline, "price": round(price, 2),
+                      "custom": str(override).strip() != "" and round(price, 2) != baseline})
+        subtotal += price
+        total_sf += sf
+    return {"lines": lines, "subtotal": round(subtotal, 2), "totalSF": total_sf}
 
 def parse_tax_rate(cfg):
     """Parse tax rate from config. Always stored as a decimal (e.g. 0.085 for 8.5%)."""
@@ -456,6 +592,8 @@ def proposal_value(cfg):
         return v is True or v == 1 or (isinstance(v, str) and v.lower() == "true")
     if _truthy(cfg.get("hidePricing")):
         return 0.0
+    if cfg.get("leaseType") == "roofmri":
+        return mri_totals(cfg)["subtotal"]
     if cfg.get("leaseType") == "fixed":
         return round(safe_int(cfg.get("numVents", 0)) * safe_float(cfg.get("ventRate", 0))
                      + safe_float(cfg.get("installFee", 0)), 2)
@@ -641,6 +779,11 @@ ALLOWED_CONFIG_KEYS = frozenset({
     # fixed-lease
     "numVents", "ventRate", "leaseTerm", "installFee",
     "shipAddress", "shipCity", "shipState", "shipZip",
+    # roof-mri scan. scanAddresses is an array of objects; the sanitizer
+    # filters top-level keys only, so the nested rows pass through intact
+    # (same precedent as customOptionPayments).
+    "scanAddresses", "roofAccess", "accessNotes", "knownHazards",
+    "siteContactName", "siteContactPhone", "reportDays", "includeRedryBid",
     # round-trip metadata
     "_proposalId",
 })
@@ -670,9 +813,11 @@ def generate_pdf():
     try:
         if request.content_type and "multipart" in request.content_type:
             config = json.loads(request.form.get("config", "{}"))
-            vent_map = request.files.get("ventMap")
+            pdf_uploads = [f for f in request.files.getlist("ventMap") if f and f.filename]
+            vent_map = pdf_uploads[0] if pdf_uploads else None
         else:
             config = request.get_json() or {}
+            pdf_uploads = []
             vent_map = None
         _sanitize_incoming_config(config)
         vent_map_path = None
@@ -682,7 +827,15 @@ def generate_pdf():
             vent_map.save(vent_map_path)
         config["_baseUrl"] = request.host_url.rstrip("/")
         lease_type = config.get("leaseType", "performance")
-        if lease_type == "fixed":
+        if lease_type == "roofmri":
+            _paths = []
+            for i, fh in enumerate(pdf_uploads):
+                fn = secure_filename(fh.filename) or f"overhead{i}.png"
+                dest = os.path.join(UPLOAD_DIR, f"ovh_{uuid.uuid4().hex[:8]}_{fn}")
+                fh.save(dest); _paths.append(dest)
+            pdf_bytes = generate_mri_proposal_pdf(config, logo_path=LOGO_PATH if os.path.exists(LOGO_PATH) else None,
+                                                  vent_map_paths=_paths)
+        elif lease_type == "fixed":
             pdf_bytes = generate_fixed_proposal_pdf(config, logo_path=LOGO_PATH if os.path.exists(LOGO_PATH) else None, vent_map_path=vent_map_path)
         else:
             pdf_bytes = generate_proposal_pdf(config, logo_path=LOGO_PATH if os.path.exists(LOGO_PATH) else None, vent_map_path=vent_map_path)
@@ -706,9 +859,13 @@ def generate_proposal_link():
     try:
         if request.content_type and "multipart" in request.content_type:
             config = json.loads(request.form.get("config", "{}"))
-            vent_map = request.files.get("ventMap")
+            # A Roof MRI proposal uploads one overhead per address, so read the
+            # whole list. Single-image lease proposals keep using [0].
+            uploaded = [f for f in request.files.getlist("ventMap") if f and f.filename]
+            vent_map = uploaded[0] if uploaded else None
         else:
             config = request.get_json() or {}
+            uploaded = []
             vent_map = None
         _sanitize_incoming_config(config)
         # If the client sent a _proposalId AND that row already exists in
@@ -721,14 +878,21 @@ def generate_proposal_link():
         requested_pid = config.pop("_proposalId", None)
         proposal_id = None
         existing_created_at = None
+        existing_vent_map_filename = None
+        existing_overheads = None
         if requested_pid and validate_pid(requested_pid) and DATABASE_URL:
             try:
                 conn = get_db(); cur = conn.cursor()
-                cur.execute("SELECT config->>'_createdAt' FROM proposals WHERE id=%s", (requested_pid,))
+                cur.execute("SELECT config->>'_createdAt', config->>'_ventMapFilename', config->>'_overheadFiles' FROM proposals WHERE id=%s", (requested_pid,))
                 row = cur.fetchone()
                 if row is not None:
                     proposal_id = requested_pid
                     existing_created_at = row[0]
+                    existing_vent_map_filename = row[1]
+                    try:
+                        existing_overheads = json.loads(row[2]) if row[2] else None
+                    except Exception:
+                        existing_overheads = None
                 conn.close()
             except Exception as e:
                 print(f"generate_proposal_link: lookup of requested_pid {requested_pid} failed, falling back to new: {e}")
@@ -743,16 +907,50 @@ def generate_proposal_link():
             vent_map_bytes = vent_map.read()
             with open(os.path.join(PROPOSALS_DIR, vent_map_filename), "wb") as f:
                 f.write(vent_map_bytes)
+        # Every uploaded overhead, in the order the addresses were entered.
+        # Written to proposal_images below; the first also lands in the legacy
+        # vent_map columns above so old read paths keep working.
+        extra_images = []
+        _addr_labels = [str((r or {}).get("address", "") or "") for r in (config.get("scanAddresses") or [])]
+        for i, fh in enumerate(uploaded):
+            fn = secure_filename(fh.filename) or f"overhead{i}.png"
+            stored = f"{proposal_id}_ovh{i}_{fn}"
+            data = vent_map_bytes if (i == 0 and vent_map_bytes is not None) else fh.read()
+            try:
+                with open(os.path.join(PROPOSALS_DIR, stored), "wb") as f: f.write(data)
+            except Exception as e:
+                print(f"overhead write failed for {proposal_id} #{i}: {e}")
+            extra_images.append((i, _addr_labels[i] if i < len(_addr_labels) else "", stored,
+                                 fh.mimetype or "image/png", data))
+        # Server-managed pointer list (underscore prefix keeps it out of the
+        # incoming whitelist). Lets the disk fallback find the images when
+        # Postgres is unavailable; the DB copy is what survives a redeploy.
+        if extra_images:
+            config["_overheadFiles"] = [f for (_i, _l, f, _m, _b) in extra_images]
+        elif existing_overheads:
+            config["_overheadFiles"] = existing_overheads
         config["_baseUrl"] = request.host_url.rstrip("/")
         lease_type = config.get("leaseType", "performance")
         _logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
         _vmap = os.path.join(PROPOSALS_DIR, vent_map_filename) if vent_map_filename else None
-        if lease_type == "fixed":
-            pdf_bytes = generate_fixed_proposal_pdf(config, logo_path=_logo, vent_map_path=_vmap)
+        _full_gen, _client_gen = PDF_GENERATORS.get(lease_type, PDF_GENERATORS["performance"])
+        if lease_type == "roofmri":
+            _paths = [os.path.join(PROPOSALS_DIR, f) for (_o, _l, f, _m, _b) in extra_images] if extra_images \
+                     else ([_vmap] if _vmap else [])
+            pdf_bytes = _full_gen(config, logo_path=_logo, vent_map_paths=_paths)
         else:
-            pdf_bytes = generate_proposal_pdf(config, logo_path=_logo, vent_map_path=_vmap)
+            pdf_bytes = _full_gen(config, logo_path=_logo, vent_map_path=_vmap)
         with open(os.path.join(PROPOSALS_DIR, f"{proposal_id}.pdf"), "wb") as f: f.write(pdf_bytes)
-        config["_ventMapFilename"] = vent_map_filename
+        # Only overwrite the image pointer when a new file was actually
+        # uploaded. db_store_proposal deliberately PRESERVES vent_map_bytes
+        # when none are passed, so blanking the pointer here would orphan the
+        # stored image: the bytes stay in Postgres but /ventmap 404s and every
+        # regenerated PDF silently loses Exhibit A. Triggered by the ordinary
+        # "load from Past Proposals, tweak, Create Client Link" flow.
+        if vent_map_filename is not None:
+            config["_ventMapFilename"] = vent_map_filename
+        elif existing_vent_map_filename:
+            config["_ventMapFilename"] = existing_vent_map_filename
         # Preserve the original creation timestamp when updating; only stamp
         # one for genuinely new proposals. The SPA strips _createdAt from
         # cfg on load, so the existing value has to come from the DB
@@ -769,6 +967,9 @@ def generate_proposal_link():
                 db_store_proposal(proposal_id, config, "draft",
                                   vent_map_bytes=vent_map_bytes,
                                   vent_map_filename=vent_map_filename)
+                # Only replaces the set when files were actually uploaded, so a
+                # regenerate without re-uploading keeps the stored overheads.
+                db_store_images(proposal_id, [(f, b, m, l) for (_i, l, f, m, b) in extra_images])
             except Exception as e:
                 print(f"DB error (store_proposal): {e}")
                 traceback.print_exc()
@@ -801,7 +1002,10 @@ def send_proposal(pid):
     vent_map_path = os.path.join(PROPOSALS_DIR, vent_map_filename) if vent_map_filename else None
     _logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
     lease_type = cfg.get("leaseType", "performance")
-    if lease_type == "fixed":
+    if lease_type == "roofmri":
+        client_pdf_bytes = generate_mri_client_pdf(cfg, logo_path=_logo,
+                                                   vent_map_paths=_ensure_image_files(pid, cfg))
+    elif lease_type == "fixed":
         client_pdf_bytes = generate_fixed_client_pdf(cfg, logo_path=_logo, vent_map_path=vent_map_path)
     else:
         client_pdf_bytes = generate_client_pdf(cfg, logo_path=_logo, vent_map_path=vent_map_path)
@@ -811,7 +1015,37 @@ def send_proposal(pid):
     # Format helpers
     def fc(v): return f"${v:,.2f}"
 
-    if lease_type == "fixed":
+    if lease_type == "roofmri":
+        _t = mri_totals(cfg)
+        grand_total = _t["subtotal"]
+        rows = "".join(
+            f'<tr><td style="padding:6px 12px;font-size:13px;color:#374151">{html_escape(l["address"])}'
+            f'<br><span style="font-size:11px;color:#94a3b8">{l["sf"]:,.0f} SF</span></td>'
+            f'<td style="padding:6px 12px;font-size:13px;color:#374151;text-align:right">{fc(l["price"])}</td></tr>'
+            for l in _t["lines"])
+        subject = f"Roof MRI Moisture Scan: {project}"
+        html = f"""
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
+          <div style="background:#1B2A4A;padding:20px;text-align:center"><span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:1px">RE<span style="color:#E8943A">DRY</span></span></div>
+          <div style="padding:28px;background:#fff;border:1px solid #e2e8f0">
+            <p style="font-size:15px;line-height:1.7;color:#374151">{f'Hi {contact},' if contact else 'Hello,'}</p>
+            <p style="font-size:14px;line-height:1.7;color:#374151">Thank you for the opportunity to scan <strong>{project}</strong>. Your Roof MRI moisture scan proposal is attached and summarized below.</p>
+            <p style="font-size:14px;line-height:1.7;color:#374151">We will be physically on your roof for this work. Scanning is non-destructive &mdash; the membrane is not cut or cored &mdash; and subsurface moisture is confirmed with minimally invasive pin-probe readings that are sealed on completion.</p>
+            <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
+              <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Scope &amp; Investment</p>
+              <table style="width:100%;border-collapse:collapse">{rows}
+                <tr><td style="padding:8px 12px;font-size:14px;font-weight:700;color:#1B2A4A;border-top:2px solid #E2E8F0">Total ({_t["totalSF"]:,.0f} SF)</td><td style="padding:8px 12px;font-size:14px;font-weight:700;color:#1B2A4A;text-align:right;border-top:2px solid #E2E8F0">{fc(grand_total)}</td></tr>
+              </table>
+            </div>
+            <p style="font-size:13px;line-height:1.7;color:#64748b">Payment is due prior to the inspection &mdash; we invoice separately once the agreement is signed, and schedule the roof visit on receipt.</p>
+            <p style="font-size:14px;line-height:1.7;color:#374151">If the scan finds moisture, drying is an option: on request we will include a ReDry drying proposal alongside your report at no additional cost.</p>
+            <div style="margin-top:24px;text-align:center">
+              <a href="{proposal_url}" style="display:inline-block;background:#E8943A;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">Review &amp; Sign Proposal</a>
+            </div>
+          </div>
+          <div style="padding:16px;text-align:center;font-size:11px;color:#94a3b8">ReDry, LLC | Advancing the Science of Moisture Removal</div>
+        </div>"""
+    elif lease_type == "fixed":
         # Fixed lease pricing
         num_vents = int(cfg.get("numVents", 0) or 0)
         vent_rate = float(cfg.get("ventRate", 1000) or 1000)
@@ -986,7 +1220,16 @@ def send_for_approval(pid):
     tax_rate_val = parse_tax_rate(cfg)
     def fc(v): return f"${v:,.2f}"
 
-    if lease_type == "fixed":
+    if lease_type == "roofmri":
+        _t = mri_totals(cfg)
+        grand_total = _t["subtotal"]
+        pricing_rows = "".join(
+            f'<tr><td style="padding:4px 12px;font-size:13px;color:#374151">{html_escape(l["address"])}'
+            f' ({l["sf"]:,.0f} SF)</td><td style="padding:4px 12px;font-size:13px;color:#374151;'
+            f'text-align:right">{fc(l["price"])}</td></tr>' for l in _t["lines"]) or \
+            '<tr><td style="padding:4px 12px;font-size:13px;color:#374151">No addresses entered</td>'\
+            '<td style="padding:4px 12px;font-size:13px;text-align:right">&mdash;</td></tr>'
+    elif lease_type == "fixed":
         num_vents = int(cfg.get("numVents", 0) or 0)
         vent_rate = float(cfg.get("ventRate", 1000) or 1000)
         lease_term = int(cfg.get("leaseTerm", 12) or 12)
@@ -1031,7 +1274,7 @@ def send_for_approval(pid):
         <div style="margin:20px 0;padding:16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
           <p style="font-size:13px;font-weight:700;color:#1B2A4A;margin:0 0 10px 0;text-transform:uppercase;letter-spacing:0.5px">Proposal Details</p>
           <table style="width:100%;border-collapse:collapse;font-size:13px;line-height:1.8">
-            <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Type:</td><td style="color:#1B2A4A;font-weight:600">{'Fixed Lease' if lease_type == 'fixed' else 'Performance Lease'}</td></tr>
+            <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Type:</td><td style="color:#1B2A4A;font-weight:600">{LEASE_TYPE_LABELS.get(lease_type, 'Performance Lease')}</td></tr>
             <tr><td style="font-weight:700;color:#64748b;padding-right:16px">Contractor:</td><td style="color:#1B2A4A;font-weight:600">{company}</td></tr>
             {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Contact:</td><td style="color:#1B2A4A">{contact}</td></tr>' if contact else ''}
             {f'<tr><td style="font-weight:700;color:#64748b;padding-right:16px">Email:</td><td style="color:#1B2A4A">{html_escape(client_email)}</td></tr>' if client_email else ''}
@@ -1089,6 +1332,16 @@ def get_client_pdf(pid):
     pdf_bytes = get_or_regenerate_pdf(pid, client_facing=True)
     if not pdf_bytes: return jsonify({"error": "Not found"}), 404
     return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf")
+
+@app.route("/api/proposal/<pid>/ventmap/<int:idx>")
+def get_proposal_image(pid, idx):
+    """Nth overhead image for a multi-address Roof MRI proposal. Index 0 also
+    resolves through the legacy single-image path, so existing client links
+    that only know /ventmap keep working."""
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
+    paths = _ensure_image_files(pid, load_proposal_config(pid) or {})
+    if idx < 0 or idx >= len(paths): return jsonify({"error": "No image"}), 404
+    return send_file(paths[idx])
 
 @app.route("/api/proposal/<pid>/ventmap")
 def get_proposal_ventmap(pid):
