@@ -310,6 +310,44 @@ check("SPA carries the overview view", b"OverviewView" in _r.data)
 check("overview page has a contact CTA", b"Questions about this project?" in _r.data)
 check("builders expose the no-pricing link", b"Overview link" in _r.data)
 
+# 22. Every link we hand a client must be https. Render terminates TLS at its
+#     edge and forwards plain HTTP, so an unguarded request.host_url reports
+#     http:// and the proposal link a client clicks gets an "insecure" browser
+#     interstitial and trips corporate mail filters. Regression-guard it.
+def _origin(**kw):
+    with server.app.test_request_context("/", **kw):
+        return server.public_base_url()
+
+check("render origin is https when the proxy header is present",
+      _origin(base_url="http://redry-proposal-app.onrender.com",
+              headers={"X-Forwarded-Proto": "https"}).startswith("https://"))
+check("render origin is https even without the proxy header",
+      _origin(base_url="http://redry-proposal-app.onrender.com").startswith("https://"),
+      "a public host must never yield an http:// link")
+check("custom domain is upgraded to https",
+      _origin(base_url="http://proposals.re-dry.com") == "https://proposals.re-dry.com")
+check("an https request stays https",
+      _origin(base_url="https://redry-proposal-app.onrender.com") == "https://redry-proposal-app.onrender.com")
+check("localhost keeps http so dev still works",
+      _origin(base_url="http://127.0.0.1:5000") == "http://127.0.0.1:5000")
+check("localhost by name keeps http",
+      _origin(base_url="http://localhost:8080") == "http://localhost:8080")
+check("no raw host_url survives outside the helper",
+      open(server.__file__, encoding="utf-8").read().count('request.host_url.rstrip("/")') == 1,
+      "a new call site would reintroduce http:// links")
+
+# 23. Baseline security headers on every response.
+_r = client.get("/")
+check("nosniff header present", _r.headers.get("X-Content-Type-Options") == "nosniff")
+check("frame options present", _r.headers.get("X-Frame-Options") == "SAMEORIGIN")
+check("referrer policy present", _r.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin")
+check("HSTS not sent over plain http (dev safety)",
+      _r.headers.get("Strict-Transport-Security") is None)
+_rs = client.get("/", base_url="https://redry-proposal-app.onrender.com")
+check("HSTS sent over https",
+      "max-age=31536000" in (_rs.headers.get("Strict-Transport-Security") or ""),
+      "HSTS is what stops an emailed http:// link from ever leaving the browser insecure")
+
 # 14. Events endpoint: malformed id rejected, well-formed unknown returns []
 r = client.get("/api/proposal/NOT-A-VALID-ID/events")
 check("GET /api/proposal/<bad>/events -> 400", r.status_code == 400, f"got {r.status_code}")

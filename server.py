@@ -18,8 +18,14 @@ except ImportError:
     ZoneInfoNotFoundError = Exception
 from html import escape as html_escape
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__, static_folder="static")
+# Render terminates TLS at its edge and forwards plain HTTP to gunicorn, so
+# without this Flask reports wsgi.url_scheme='http' and every link we generate
+# comes out as http:// -- which browsers show a "Not secure" interstitial for
+# and corporate mail filters flag on the way in. Honor the proxy's headers.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "").split(",") if os.environ.get("CORS_ORIGINS") else []
 CORS(app, origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS else ["*"], supports_credentials=True)
@@ -58,12 +64,56 @@ SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "adam@re-dry.com")
 NOTIFY_EMAILS = [e.strip() for e in os.environ.get("NOTIFY_EMAILS", "adam@re-dry.com,regina@re-dry.com").split(",") if e.strip()]
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "adam@re-dry.com")
+# Set this in production to pin every generated link to one canonical origin
+# (e.g. https://proposals.re-dry.com). Wins over anything inferred from the
+# request, so a custom domain or a proxy quirk can never emit an http:// link.
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+
+_LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+
+def public_base_url():
+    """Absolute origin for links handed to clients: proposal links, email
+    buttons, PDF footers, and Stripe return URLs.
+
+    Every one of those is read by someone else's browser or mail scanner, so
+    an http:// origin gets flagged as unsafe even though the host redirects.
+    PUBLIC_BASE_URL wins when set; otherwise take the request origin (ProxyFix
+    has already applied X-Forwarded-Proto) and upgrade a stray http:// to
+    https:// for any non-local host as a last line of defense. Local
+    development keeps http so it stays usable."""
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL
+    base = request.host_url.rstrip("/")
+    host = (request.host or "").split(":")[0].lower()
+    if base.startswith("http://") and host not in _LOCAL_HOSTS and not host.endswith(".local"):
+        base = "https://" + base[len("http://"):]
+    return base
 REPLY_TO_EMAIL = os.environ.get("REPLY_TO_EMAIL", "adam@re-dry.com")
 
 for name, val in [("STRIPE_SECRET_KEY", stripe.api_key), ("STRIPE_PUBLISHABLE_KEY", STRIPE_PK),
                    ("GOOGLE_MAPS_API_KEY", GOOGLE_MAPS_KEY), ("DATABASE_URL", DATABASE_URL),
                    ("SENDGRID_API_KEY", SENDGRID_API_KEY)]:
     if not val: print(f"WARNING: {name} not set.")
+
+@app.after_request
+def _security_headers(resp):
+    """Baseline hardening for a site that clients open from an emailed link.
+
+    HSTS is the one that matters for the "not secure" complaint: once a
+    browser has seen it, an http:// link to this host is upgraded internally
+    and never leaves as an insecure request. Only sent over https so a local
+    http dev server can't pin itself.
+
+    No CSP here on purpose -- the SPA is a single inline text/babel script
+    compiled in the browser, so any useful policy would need 'unsafe-inline'
+    plus 'unsafe-eval' and would buy nothing while risking a blank app.
+    """
+    if request.is_secure:
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return resp
 
 # ─── Auth Routes ───
 @app.route("/api/auth/login", methods=["POST"])
@@ -912,7 +962,7 @@ def generate_pdf():
             filename = secure_filename(vent_map.filename)
             vent_map_path = os.path.join(UPLOAD_DIR, f"ventmap_{uuid.uuid4().hex[:8]}_{filename}")
             vent_map.save(vent_map_path)
-        config["_baseUrl"] = request.host_url.rstrip("/")
+        config["_baseUrl"] = public_base_url()
         lease_type = config.get("leaseType", "performance")
         if lease_type == "roofmri":
             _paths = []
@@ -1016,7 +1066,7 @@ def generate_proposal_link():
             config["_overheadFiles"] = [f for (_i, _l, f, _m, _b) in extra_images]
         elif existing_overheads:
             config["_overheadFiles"] = existing_overheads
-        config["_baseUrl"] = request.host_url.rstrip("/")
+        config["_baseUrl"] = public_base_url()
         lease_type = config.get("leaseType", "performance")
         _logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
         _vmap = os.path.join(PROPOSALS_DIR, vent_map_filename) if vent_map_filename else None
@@ -1084,7 +1134,7 @@ def send_proposal(pid):
     company = html_escape(cfg.get("clientCompany", "Client"))
     contact = html_escape(cfg.get("clientContact", ""))
     section = html_escape(cfg.get("projectSection", ""))
-    base_url = request.host_url.rstrip("/")
+    base_url = public_base_url()
     proposal_url = f"{base_url}/proposal/{pid}"
     # Generate client-facing PDF (no pricing) and save it
     cfg["_baseUrl"] = base_url
@@ -1302,7 +1352,7 @@ def send_for_approval(pid):
     section = html_escape(cfg.get("projectSection", ""))
     contact = html_escape(cfg.get("clientContact", ""))
     client_email = cfg.get("clientEmail", "")
-    base_url = request.host_url.rstrip("/")
+    base_url = public_base_url()
     proposal_url = f"{base_url}/proposal/{pid}"
 
     # Calculate pricing for summary
@@ -1537,7 +1587,7 @@ def accept_proposal(pid):
     contact = html_escape(cfg.get("clientContact", "")); client_email = cfg.get("clientEmail", "")
     section = html_escape(cfg.get("projectSection", "")); signer = html_escape(acc.get("name", "Unknown"))
     option_num = acc.get("selectedOption", "?"); option_label = OPTION_LABELS.get(option_num, f"Option {option_num}")
-    base_url = request.host_url.rstrip("/")
+    base_url = public_base_url()
     pay_label = {"card": "Credit Card", "ach": "ACH / Bank Transfer"}.get(pay_method, "Not specified")
     option_label_clean = str(option_label).rstrip(". ")
     warranty_url = f"{base_url}/warranty"
@@ -1616,7 +1666,7 @@ def create_checkout_session():
         payment_method = data.get("paymentMethod", "card")
         client_company = data.get("clientCompany", ""); project_name = data.get("projectName", "")
         pmt_types = ["us_bank_account"] if payment_method == "ach" else ["card"]
-        base_url = request.host_url.rstrip("/")
+        base_url = public_base_url()
         params = {
             "payment_method_types": pmt_types,
             "line_items": [{"price_data": {"currency": "usd", "product_data": {"name": description, "description": f"{project_name} | {client_company}"}, "unit_amount": amount_cents}, "quantity": 1}],
