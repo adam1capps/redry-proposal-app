@@ -348,6 +348,24 @@ check("HSTS sent over https",
       "max-age=31536000" in (_rs.headers.get("Strict-Transport-Security") or ""),
       "HSTS is what stops an emailed http:// link from ever leaving the browser insecure")
 
+# 24. "Invoice sent separately": the client must still SIGN, but must not be
+#     forced to pick a payment option or a payment method.
+_inv = {"leaseType": "performance", "clientCompany": "Acme", "projectName": "P",
+        "wetSF": "1000", "ratePSF": "2", "invoiceSeparately": True}
+server._sanitize_incoming_config(_inv)
+check("invoiceSeparately survives the config whitelist", _inv.get("invoiceSeparately") is True,
+      "would be silently dropped and the toggle would do nothing")
+check("invoiceSeparately does not change the bid value",
+      server.proposal_value(_inv) == 2000.0, "pricing is unaffected; only collection changes")
+_r = client.get("/")
+check("builders expose the invoice-separately toggle", b"Invoice sent separately" in _r.data)
+check("signing gate accounts for invoiceSeparately",
+      b"!form.invoiceSeparately && selectedOption===null" in _r.data,
+      "the 'select an option to continue' block must not fire in this mode")
+check("signature is still required in this mode",
+      _r.data.count(b"!sigName||!sigDate||!termsOk") >= 3,
+      "every client view must still require name, date and terms")
+
 # 14. Events endpoint: malformed id rejected, well-formed unknown returns []
 r = client.get("/api/proposal/NOT-A-VALID-ID/events")
 check("GET /api/proposal/<bad>/events -> 400", r.status_code == 400, f"got {r.status_code}")

@@ -204,7 +204,7 @@ const defaultForm = {
   projectName:"", projectAddress:"", projectCity:"", projectState:"", projectZip:"",
   projectSection:"", wetSF:"", ratePSF:"2.00", scanCost:"4500", numScans:"4",
   scanInterval:"3", totalVents:"", proposalDate: new Date().toISOString().split("T")[0], validDays:"30",
-  taxRate:"", waiveScans: false, hideScans: false, hidePricing: false,
+  taxRate:"", waiveScans: false, hideScans: false, hidePricing: false, invoiceSeparately: false,
   showOption0: false, showOption1: true, showOption2: false,
   showCustomOption: false,
   customOptionLabel: "",
@@ -261,7 +261,7 @@ const defaultFixedForm = {
   projectSection:"", numVents:"", ventRate:"1000", leaseTerm:"12", installFee:"0",
   shipAddress:"", shipCity:"", shipState:"", shipZip:"",
   proposalDate: new Date().toISOString().split("T")[0], validDays:"30",
-  taxRate:""
+  taxRate:"", invoiceSeparately: false
 };
 // ─── Roof MRI Scan defaults & content ───
 // Every process claim below is sourced from ReDry field-training recordings.
@@ -636,6 +636,11 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
               style={{width:18,height:18,accentColor:C.orange,cursor:"pointer"}}/>
             Hide all pricing (complimentary)
           </label>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy}}>
+            <input type="checkbox" checked={!!form.invoiceSeparately} onChange={e=>setForm(f=>({...f,invoiceSeparately:e.target.checked}))}
+              style={{width:18,height:18,accentColor:C.orange,cursor:"pointer"}}/>
+            Invoice sent separately
+          </label>
         </div>
       </div>
 
@@ -977,6 +982,11 @@ function FixedLeaseBuilder({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink
           </div>
         </div>
       </div>
+      <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,marginTop:8}}>
+        <input type="checkbox" checked={!!form.invoiceSeparately} onChange={e=>setForm(f=>({...f,invoiceSeparately:e.target.checked}))}
+          style={{width:18,height:18,accentColor:C.orange,cursor:"pointer"}}/>
+        Invoice sent separately
+      </label>
 
       {numVents>0 && <div style={{marginTop:20}}>
         <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Payment — Due in Full</div>
@@ -1161,13 +1171,13 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   // was collected elsewhere, never to start one.
 
   const doAccept = async()=>{
-    if(!sigName||!sigDate||!termsOk||(selectedOption===null && !form.hidePricing))return;
+    if(!sigName||!sigDate||!termsOk||(selectedOption===null && !form.hidePricing && !form.invoiceSeparately))return;
     setSubmitting(true);
     try{
       if(proposalId) {
         const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption!==null?selectedOption+1:null,
-            paymentMethod:form.hidePricing?null:payingWith, warrantyAccepted:termsOk, warrantyVersion:WARRANTY_VERSION})});
+            paymentMethod:(form.hidePricing||form.invoiceSeparately)?null:payingWith, warrantyAccepted:termsOk, warrantyVersion:WARRANTY_VERSION})});
         if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
         if(!r.ok){ alert("Failed to submit acceptance. Please try again."); setSubmitting(false); return; }
       }
@@ -1191,15 +1201,17 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           <div>Signed by: <strong style={{color:C.dark}}>{sigName}</strong></div>
           <div>Date: <strong style={{color:C.dark}}>{sigDate}</strong></div>
           {selectedOption!==null && <div>Selected: <strong style={{color:C.dark}}>{options[selectedOption]?.label || `Option ${selectedOption+1}`}</strong></div>}
-          {!form.hidePricing && <div>Preferred payment: <strong style={{color:C.dark}}>{payingWith==="ach"?"ACH / Bank Transfer":"Credit Card"}</strong></div>}
+          {!form.hidePricing && !form.invoiceSeparately && <div>Preferred payment: <strong style={{color:C.dark}}>{payingWith==="ach"?"ACH / Bank Transfer":"Credit Card"}</strong></div>}
           <div>Warranty: <strong style={{color:C.dark}}>Limited Material Warranty Agreement accepted</strong></div>
         </div>
         {!form.hidePricing && <div style={{marginTop:20,padding:"16px 18px",background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,textAlign:"left"}}>
           <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:6}}>What happens next</div>
           <p style={{fontSize:13,color:C.gray,lineHeight:1.7,margin:0}}>
-            No payment was collected today. <strong style={{color:C.dark}}>You will receive an invoice separately</strong> for
-            {" "}{(options[selectedOption]?.label || "the selected option").replace(/\.\s*$/,"")}, payable by {payingWith==="ach"?"ACH / bank transfer":"credit card"}.
-            The ReDry team will also reach out to coordinate scheduling.
+            No payment was collected today. <strong style={{color:C.dark}}>You will receive an invoice separately</strong>
+            {selectedOption!==null && !form.invoiceSeparately
+              ? ` for ${(options[selectedOption]?.label || "the selected option").replace(/\.\s*$/,"")}, payable by ${payingWith==="ach"?"ACH / bank transfer":"credit card"}.`
+              : "."}
+            {" "}The ReDry team will also reach out to coordinate scheduling.
           </p>
         </div>}
         <div style={{marginTop:16,fontSize:12,color:C.gray}}>
@@ -1291,7 +1303,9 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           {visibleOptions.length>0 && visibleOptions[0].opt.achEligible && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>ACH Savings:</span> Save $100 when paying via bank transfer</div>}
         </div>}
 
-        {!form.hidePricing && visibleOptions.length > 1 && <P>Review the options below and select the one you’d like. Nothing is charged here — ReDry will invoice you separately for the option you choose.</P>}
+        {!form.hidePricing && visibleOptions.length > 1 && <P>{form.invoiceSeparately
+            ? "Review the options below. Nothing is charged here and selecting one is optional \u2014 ReDry will invoice you separately."
+            : "Review the options below and select the one you\u2019d like. Nothing is charged here \u2014 ReDry will invoice you separately for the option you choose."}</P>}
         {!form.hidePricing && visibleOptions.length === 1 && <P>Nothing is charged here — ReDry will invoice you separately.</P>}
 
         {!form.hidePricing && <div style={{display:"flex",gap:16,marginTop:16,flexWrap:"wrap"}}>
@@ -1351,13 +1365,15 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
       <div style={{background:"#fff",borderRadius:12,border:`2px solid ${C.orange}`,padding:"28px 32px"}}>
         <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Sign and Accept</h2>
         <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
-        {!form.hidePricing && selectedOption===null && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:16}}>
+        {!form.hidePricing && !form.invoiceSeparately && selectedOption===null && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:16}}>
           <div style={{fontSize:14,fontWeight:600,color:C.orange}}>Please select a payment option above to continue.</div>
         </div>}
-        {(form.hidePricing || selectedOption!==null) && <>
+        {(form.hidePricing || form.invoiceSeparately || selectedOption!==null) && <>
           {form.hidePricing
             ? <P>By signing below, you accept this complimentary proposal and agree to the Terms and Conditions above, including the ReDry Limited Material Warranty Agreement incorporated by reference.</P>
-            : <P>By signing below, you accept this proposal under <strong>{options[selectedOption].label}</strong> and agree to the Terms and Conditions above, including the ReDry Limited Material Warranty Agreement incorporated by reference.</P>}
+            : selectedOption===null
+              ? <P>By signing below, you accept this proposal and agree to the Terms and Conditions above, including the ReDry Limited Material Warranty Agreement incorporated by reference. ReDry will invoice you separately.</P>
+              : <P>By signing below, you accept this proposal under <strong>{options[selectedOption].label}</strong> and agree to the Terms and Conditions above, including the ReDry Limited Material Warranty Agreement incorporated by reference.</P>}
           <div style={{display:"flex",gap:16,marginTop:20,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:200}}>
               <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Full Name / Title</label>
@@ -1372,7 +1388,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
             <input type="checkbox" checked={termsOk} onChange={e=>setTermsOk(e.target.checked)} style={{marginTop:3,width:16,height:16,accentColor:C.orange,flexShrink:0,cursor:"pointer"}}/>
             <span>I have read and agree to the Terms and Conditions of this proposal and to the ReDry <a href="/warranty" target="_blank" rel="noopener" style={{color:C.orange,fontWeight:700}}>Limited Material Warranty Agreement</a>.</span>
           </label>
-          {!form.hidePricing && <div style={{marginTop:18,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+          {!form.hidePricing && !form.invoiceSeparately && <div style={{marginTop:18,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
             <div style={{fontSize:13,fontWeight:600,color:C.navy,marginBottom:2}}>Preferred payment method</div>
             <div style={{fontSize:12,color:C.gray,marginBottom:8}}>For invoicing only &mdash; nothing is charged when you sign.</div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -1454,7 +1470,7 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
       if(proposalId) {
         const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({name:sigName,date:sigDate,selectedOption:1,
-            paymentMethod:payingWith, warrantyAccepted:termsOk, warrantyVersion:WARRANTY_VERSION})});
+            paymentMethod:form.invoiceSeparately?null:payingWith, warrantyAccepted:termsOk, warrantyVersion:WARRANTY_VERSION})});
         if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
         if(!r.ok){ alert("Failed to submit acceptance. Please try again."); setSubmitting(false); return; }
       }
@@ -1476,14 +1492,17 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
         <div style={{marginTop:24,padding:16,background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,color:C.gray,textAlign:"left"}}>
           <div>Signed by: <strong style={{color:C.dark}}>{sigName}</strong></div>
           <div>Date: <strong style={{color:C.dark}}>{sigDate}</strong></div>
-          <div>Preferred payment: <strong style={{color:C.dark}}>{payingWith==="ach"?"ACH / Bank Transfer":"Credit Card"}</strong></div>
+          {!form.invoiceSeparately && <div>Preferred payment: <strong style={{color:C.dark}}>{payingWith==="ach"?"ACH / Bank Transfer":"Credit Card"}</strong></div>}
           <div>Warranty: <strong style={{color:C.dark}}>Limited Material Warranty Agreement accepted</strong></div>
         </div>
         <div style={{marginTop:20,padding:"16px 18px",background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,textAlign:"left"}}>
           <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:6}}>What happens next</div>
           <p style={{fontSize:13,color:C.gray,lineHeight:1.7,margin:0}}>
-            No payment was collected today. <strong style={{color:C.dark}}>You will receive an invoice separately</strong> for {fmtC(payingWith==="ach"?opt.achTotal:opt.total)},
-            payable by {payingWith==="ach"?"ACH / bank transfer":"credit card"}. The ReDry team will also reach out to coordinate scheduling.
+            No payment was collected today. <strong style={{color:C.dark}}>You will receive an invoice separately</strong>
+            {form.invoiceSeparately
+              ? ` for ${fmtC(opt.total)}.`
+              : ` for ${fmtC(payingWith==="ach"?opt.achTotal:opt.total)}, payable by ${payingWith==="ach"?"ACH / bank transfer":"credit card"}.`}
+            {" "}The ReDry team will also reach out to coordinate scheduling.
           </p>
         </div>
         <div style={{marginTop:16,fontSize:12,color:C.gray}}>
@@ -1599,7 +1618,7 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
           <input type="checkbox" checked={termsOk} onChange={e=>setTermsOk(e.target.checked)} style={{marginTop:3,width:16,height:16,accentColor:C.orange,flexShrink:0,cursor:"pointer"}}/>
           <span>I have read and agree to the Terms and Conditions of this proposal and to the ReDry <a href="/warranty" target="_blank" rel="noopener" style={{color:C.orange,fontWeight:700}}>Limited Material Warranty Agreement</a>.</span>
         </label>
-        <div style={{marginTop:18,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+        {!form.invoiceSeparately && <div style={{marginTop:18,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
           <div style={{fontSize:13,fontWeight:600,color:C.navy,marginBottom:2}}>Preferred payment method</div>
           <div style={{fontSize:12,color:C.gray,marginBottom:8}}>For invoicing only &mdash; nothing is charged when you sign.</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -1608,7 +1627,7 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
               ACH / Bank Transfer {opt.achEligible ? "(Save $100)" : ""}
             </button>
           </div>
-        </div>
+        </div>}
         <button onClick={doAccept} disabled={!sigName||!sigDate||!termsOk||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&termsOk&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&termsOk&&!submitting?"pointer":"not-allowed"}}>
           {submitting?"Submitting...":"Sign and Accept Agreement"}
         </button>

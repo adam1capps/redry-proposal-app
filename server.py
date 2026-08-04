@@ -871,7 +871,7 @@ ALLOWED_CONFIG_KEYS = frozenset({
     "proposalDate", "validDays", "taxRate",
     # performance-lease
     "wetSF", "ratePSF", "scanCost", "numScans", "scanInterval", "totalVents",
-    "waiveScans", "hideScans", "hidePricing",
+    "waiveScans", "hideScans", "hidePricing", "invoiceSeparately",
     "showOption0", "showOption1", "showOption2",
     "showCustomOption", "customOptionLabel", "customOptionAdj", "customOptionPayments",
     # fixed-lease
@@ -1588,8 +1588,17 @@ def accept_proposal(pid):
     section = html_escape(cfg.get("projectSection", "")); signer = html_escape(acc.get("name", "Unknown"))
     option_num = acc.get("selectedOption", "?"); option_label = OPTION_LABELS.get(option_num, f"Option {option_num}")
     base_url = public_base_url()
+    # When the operator elected "Invoice sent separately", the client was
+    # never asked for a payment method, so don't report one either way.
+    invoice_separately = bool(cfg.get("invoiceSeparately"))
     pay_label = {"card": "Credit Card", "ach": "ACH / Bank Transfer"}.get(pay_method, "Not specified")
+    if invoice_separately or not pay_method:
+        pay_label = "Invoice sent separately"
     option_label_clean = str(option_label).rstrip(". ")
+    # No option chosen (operator elected invoice-separately, or a complimentary
+    # proposal) -- don't render "Option None" into the client's email.
+    if option_num in (None, "?", "") or not OPTION_LABELS.get(option_num):
+        option_label_clean = ""
     warranty_url = f"{base_url}/warranty"
     admin_html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
@@ -1602,13 +1611,13 @@ def accept_proposal(pid):
           <tr><td style="font-weight:700;padding-right:16px">Signed By:</td><td>{signer}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Date Signed:</td><td>{html_escape(acc.get('date',''))}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Payment Option:</td><td>{option_label}</td></tr>
-          <tr><td style="font-weight:700;padding-right:16px">Preferred Payment:</td><td><strong>{pay_label}</strong> &mdash; invoice separately</td></tr>
+          <tr><td style="font-weight:700;padding-right:16px">Billing:</td><td><strong>{pay_label}</strong></td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Warranty Agreed:</td><td>{'Yes' if sig_proof['warrantyAccepted'] else 'Not recorded'}{f" (rev. {html_escape(str(sig_proof['warrantyVersion']))})" if sig_proof['warrantyVersion'] else ''}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Signed At (UTC):</td><td>{now.strftime('%B %d, %Y at %I:%M %p UTC')}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">IP Address:</td><td style="font-size:12px;color:#64748b">{html_escape(sig_proof['ipAddress'])}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">User Agent:</td><td style="font-size:11px;color:#94a3b8">{html_escape(sig_proof['userAgent'][:120])}</td></tr>
         </table>
-        <div style="margin-top:20px;padding:12px;background:#fef7ed;border:1px solid #E8943A;border-radius:6px;font-size:13px;color:#7c2d12"><strong>Action required:</strong> send the invoice for this signed agreement. The client selected <strong>{pay_label}</strong> and has been told to expect an invoice separately.</div>
+        <div style="margin-top:20px;padding:12px;background:#fef7ed;border:1px solid #E8943A;border-radius:6px;font-size:13px;color:#7c2d12"><strong>Action required:</strong> send the invoice for this signed agreement. Billing: <strong>{pay_label}</strong>. The client has been told to expect an invoice separately.</div>
         <div style="margin-top:12px;padding:12px;background:#f8fafc;border-radius:6px;font-size:13px;color:#64748b">The signed proposal PDF is attached. This email serves as confirmation that the above individual electronically accepted this proposal and the <a href="{warranty_url}" style="color:#E8943A">Limited Material Warranty Agreement</a>.</div>
         <div style="margin-top:16px;text-align:center"><a href="{base_url}/proposal/{pid}" style="display:inline-block;background:#E8943A;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:700">View Proposal</a></div>
       </div>
@@ -1627,10 +1636,13 @@ def accept_proposal(pid):
             billing_block = """
             <p style="font-size:14px;line-height:1.7;color:#374151">This vent system is provided at no charge as a complimentary service &mdash; there is nothing to pay.</p>"""
         else:
+            pay_method_line = ("" if invoice_separately or not pay_method else
+                f'<p style="font-size:14px;line-height:1.7;color:#374151;margin:0">Preferred payment method on file: '
+                f'<strong>{pay_label}</strong>. If that changes, just reply to this email.</p>')
             billing_block = f"""
             <div style="margin-top:16px;padding:14px 16px;background:#f8fafc;border-left:3px solid #E8943A;border-radius:4px">
-              <p style="font-size:14px;line-height:1.7;color:#374151;margin:0 0 6px"><strong>What happens next:</strong> no payment was collected today. We will send an invoice separately for <strong>{option_label_clean}</strong>.</p>
-              <p style="font-size:14px;line-height:1.7;color:#374151;margin:0">Preferred payment method on file: <strong>{pay_label}</strong>. If that changes, just reply to this email.</p>
+              <p style="font-size:14px;line-height:1.7;color:#374151;margin:0 0 6px"><strong>What happens next:</strong> no payment was collected today. We will send an invoice separately{f" for <strong>{option_label_clean}</strong>" if option_label_clean else ""}.</p>
+              {pay_method_line}
             </div>"""
         client_html = f"""
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
