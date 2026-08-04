@@ -25,6 +25,7 @@ ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "").split(",") if os.environ.ge
 CORS(app, origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS else ["*"], supports_credentials=True)
 
 _PID_RE = re.compile(r'^[a-f0-9]{6,64}$')
+_TOKEN_RE = re.compile(r'^[a-f0-9]{32}$')
 def validate_pid(pid):
     if not _PID_RE.match(pid):
         return None
@@ -171,6 +172,14 @@ def init_db():
                 mime_type TEXT, image_bytes BYTEA, created_at TIMESTAMPTZ DEFAULT NOW())""")
             _exec_ignore_dup(cur, """CREATE INDEX IF NOT EXISTS proposal_images_pid
                 ON proposal_images(proposal_id, sort_order)""")
+            # Overview share link. A random 128-bit token, deliberately NOT
+            # derivable from the 12-hex proposal id, and deliberately stored
+            # in a column rather than the config JSONB: config round-trips to
+            # the browser and through _sanitize_incoming_config, so a token
+            # there would both leak to the GC and get stripped on save.
+            _exec_ignore_dup(cur, "ALTER TABLE proposals ADD COLUMN IF NOT EXISTS share_token TEXT")
+            _exec_ignore_dup(cur, """CREATE UNIQUE INDEX IF NOT EXISTS proposals_share_token_unique
+                ON proposals(share_token) WHERE share_token IS NOT NULL""")
             conn.close()
             _INIT_DB_OK = True
             _INIT_DB_LAST_ERROR = None
@@ -287,6 +296,45 @@ def db_update_status_if_earlier(pid, status, ts_field=None):
         conn.close()
         db_update_status(pid, status, ts_field)
     except Exception as e: print(f"DB error (update_status_if_earlier): {e}")
+
+def db_get_or_create_share_token(pid):
+    """Get-or-create this proposal's overview token. Race-safe: the UPDATE is
+    guarded on share_token IS NULL and we re-read afterwards, so two
+    concurrent callers converge on whichever token won. Returns None when
+    there is no database or the row is missing."""
+    if not DATABASE_URL: return None
+    try:
+        conn = get_db(); cur = conn.cursor()
+        _exec_ignore_dup(cur, "ALTER TABLE proposals ADD COLUMN IF NOT EXISTS share_token TEXT")
+        cur.execute("SELECT share_token FROM proposals WHERE id=%s", (pid,))
+        row = cur.fetchone()
+        if not row:
+            conn.close(); return None
+        if row[0]:
+            conn.close(); return row[0]
+        cur.execute("UPDATE proposals SET share_token=%s WHERE id=%s AND share_token IS NULL",
+                    (secrets.token_hex(16), pid))
+        cur.execute("SELECT share_token FROM proposals WHERE id=%s", (pid,))
+        token = cur.fetchone()[0]
+        conn.close()
+        return token
+    except Exception as e:
+        print(f"DB error (share_token): {e}")
+        return None
+
+def db_find_by_share_token(token):
+    """(pid, config) for a share token, or (None, None)."""
+    if not DATABASE_URL: return (None, None)
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("SELECT id, config FROM proposals WHERE share_token=%s", (token,))
+        row = cur.fetchone(); conn.close()
+        if not row: return (None, None)
+        cfg = row[1] if isinstance(row[1], dict) else json.loads(row[1] or "{}")
+        return (row[0], cfg)
+    except Exception as e:
+        print(f"DB error (find_by_share_token): {e}")
+        return (None, None)
 
 def db_log_event(pid, event_type, details=None):
     if not DATABASE_URL: return
@@ -788,6 +836,45 @@ ALLOWED_CONFIG_KEYS = frozenset({
     "_proposalId",
 })
 
+# ─── Overview share link redaction ───
+# INCLUDE-list, not a strip-list: a pricing field added to the builder later is
+# redacted by default instead of leaking until someone remembers to blacklist
+# it. Everything absent here never leaves the server on the overview endpoint.
+#
+# Deliberately excluded and worth stating plainly:
+#   - every pricing field (ratePSF, scanCost, taxRate, ventRate, installFee,
+#     the option flags, customOption*, and per-address scan prices)
+#   - client contact PII (clientContact/Title/Phone/Email) -- the GC's people
+#     are not the building owner's business
+#   - _proposalId, which would let a building owner walk from the redacted
+#     overview straight to the priced /proposal/<id> page
+OVERVIEW_CONFIG_KEYS = frozenset({
+    "leaseType", "clientCompany",
+    "projectName", "projectAddress", "projectCity", "projectState", "projectZip",
+    "projectSection", "proposalDate", "validDays",
+    # scope, not price -- these already appear in the client-facing PDF
+    "wetSF", "numScans", "scanInterval", "totalVents", "hideScans",
+    "numVents", "leaseTerm",
+    # roof-mri scope (per-address prices are stripped below)
+    "scanAddresses", "roofAccess",
+})
+
+def overview_public_config(cfg):
+    """Redacted copy of a proposal config, safe to hand to a third party."""
+    if not isinstance(cfg, dict):
+        return {}
+    out = {k: v for k, v in cfg.items() if k in OVERVIEW_CONFIG_KEYS}
+    # scanAddresses rows carry their own `price`, and the top-level filter
+    # cannot see inside a list. Rebuild each row from scope fields only.
+    if isinstance(out.get("scanAddresses"), list):
+        out["scanAddresses"] = [
+            {k: r.get(k, "") for k in ("address", "city", "state", "zip", "sf")}
+            for r in out["scanAddresses"] if isinstance(r, dict)
+        ]
+    out["hasVentMap"] = bool(cfg.get("_ventMapFilename") or cfg.get("_overheadFiles"))
+    out["imageCount"] = len(cfg.get("_overheadFiles") or []) or (1 if cfg.get("_ventMapFilename") else 0)
+    return out
+
 def _sanitize_incoming_config(config):
     """Whitelist filter: drop any keys not in ALLOWED_CONFIG_KEYS.
 
@@ -975,7 +1062,10 @@ def generate_proposal_link():
                 traceback.print_exc()
                 return jsonify({"error": "Could not save proposal to database. Please try again.", "detail": str(e)}), 503
         db_log_event(proposal_id, "created")
-        return jsonify({"proposalId": proposal_id, "clientUrl": f"/proposal/{proposal_id}", "pdfUrl": f"/api/proposal/{proposal_id}/pdf"})
+        _token = db_get_or_create_share_token(proposal_id)
+        return jsonify({"proposalId": proposal_id, "clientUrl": f"/proposal/{proposal_id}",
+                        "pdfUrl": f"/api/proposal/{proposal_id}/pdf",
+                        "overviewUrl": f"/overview/{_token}" if _token else None})
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -1332,6 +1422,58 @@ def get_client_pdf(pid):
     pdf_bytes = get_or_regenerate_pdf(pid, client_facing=True)
     if not pdf_bytes: return jsonify({"error": "Not found"}), 404
     return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf")
+
+# ─── Overview share link (public, no pricing) ───
+@app.route("/api/overview/<token>")
+def get_overview(token):
+    """Redacted proposal for a third party the GC forwards the link to.
+    Public by design. Logs its own event type so overview traffic never
+    inflates client 'viewed' counts, and never advances proposal status."""
+    if not _TOKEN_RE.match(token or ""):
+        return jsonify({"error": "Invalid link"}), 400
+    pid, cfg = db_find_by_share_token(token)
+    if not cfg:
+        return jsonify({"error": "Not found"}), 404
+    db_log_event(pid, "overview_viewed", {
+        "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
+        "ua": request.headers.get("User-Agent", "")[:200]})
+    return jsonify(overview_public_config(cfg))
+
+@app.route("/api/overview/<token>/ventmap")
+@app.route("/api/overview/<token>/ventmap/<int:idx>")
+def get_overview_image(token, idx=0):
+    if not _TOKEN_RE.match(token or ""):
+        return jsonify({"error": "Invalid link"}), 400
+    pid, cfg = db_find_by_share_token(token)
+    if not cfg:
+        return jsonify({"error": "Not found"}), 404
+    paths = _ensure_image_files(pid, cfg)
+    if idx < 0 or idx >= len(paths):
+        return jsonify({"error": "No image"}), 404
+    return send_file(paths[idx])
+
+@app.route("/api/overview/<token>/pdf")
+def get_overview_pdf(token):
+    """The client-facing PDF, which carries no pricing by construction."""
+    if not _TOKEN_RE.match(token or ""):
+        return jsonify({"error": "Invalid link"}), 400
+    pid, cfg = db_find_by_share_token(token)
+    if not cfg:
+        return jsonify({"error": "Not found"}), 404
+    pdf_bytes = get_or_regenerate_pdf(pid, client_facing=True)
+    if not pdf_bytes:
+        return jsonify({"error": "Not found"}), 404
+    return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf")
+
+@app.route("/api/proposal/<pid>/share-token")
+@require_auth
+def get_share_token(pid):
+    """Mint-or-fetch the overview link for the builder UI."""
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
+    if not load_proposal_config(pid): return jsonify({"error": "Not found"}), 404
+    token = db_get_or_create_share_token(pid)
+    return jsonify({"shareToken": token,
+                    "overviewUrl": f"/overview/{token}" if token else None})
 
 @app.route("/api/proposal/<pid>/ventmap/<int:idx>")
 def get_proposal_image(pid, idx):

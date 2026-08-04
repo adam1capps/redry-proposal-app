@@ -254,6 +254,62 @@ check("Roof MRI applies no sales tax",
       server.mri_totals({"scanAddresses": [{"sf": "58000"}], "taxRate": "0.0625"})["subtotal"] == 4000.0,
       "scan fees are a service -- owner confirmed no tax")
 
+# 19. Overview share link: the redaction is the security boundary. Every
+#     assertion below is a leak that would reach a third party if it broke.
+_leaky = {
+    "leaseType": "performance", "projectName": "Crockett", "clientCompany": "Tebben",
+    "projectAddress": "5601 Menchaca Rd", "projectCity": "Austin", "wetSF": "11600",
+    # None of the following may ever cross the overview boundary:
+    "ratePSF": "2.00", "scanCost": "4500", "taxRate": "0.0625", "ventRate": "1000",
+    "installFee": "500", "showOption1": True, "customOptionLabel": "Net 30",
+    "customOptionAdj": "-3", "customOptionPayments": [{"pct": "100"}],
+    "clientContact": "Justin Boren", "clientTitle": "Estimator",
+    "clientPhone": "512-555-0100", "clientEmail": "gc@example.com",
+    "_proposalId": "abcdef123456", "_ventMapFilename": "x.png", "hidePricing": False,
+}
+_pub = server.overview_public_config(_leaky)
+check("overview keeps projectName", _pub.get("projectName") == "Crockett")
+check("overview keeps wetSF (scope, not price)", _pub.get("wetSF") == "11600")
+check("overview keeps clientCompany", _pub.get("clientCompany") == "Tebben")
+for _k in ("ratePSF", "scanCost", "taxRate", "ventRate", "installFee", "showOption1",
+           "customOptionLabel", "customOptionAdj", "customOptionPayments"):
+    check(f"overview redacts pricing key '{_k}'", _k not in _pub, "PRICING LEAK")
+for _k in ("clientContact", "clientTitle", "clientPhone", "clientEmail"):
+    check(f"overview redacts contact PII '{_k}'", _k not in _pub, "PII LEAK")
+check("overview redacts _proposalId",
+      "_proposalId" not in _pub,
+      "would let a building owner walk to the priced /proposal/<id> page")
+check("overview reports hasVentMap", _pub.get("hasVentMap") is True)
+
+# Roof MRI: per-address prices live INSIDE a list, which a top-level
+# whitelist cannot see. This is the easiest leak to reintroduce.
+_mri_leaky = {"leaseType": "roofmri", "projectName": "Portfolio", "scanAddresses": [
+    {"address": "A", "city": "Austin", "state": "TX", "zip": "78745",
+     "sf": "58000", "price": "9500"}]}
+_mpub = server.overview_public_config(_mri_leaky)
+check("overview keeps scan address + SF", _mpub["scanAddresses"][0]["sf"] == "58000")
+check("overview strips per-address price",
+      "price" not in _mpub["scanAddresses"][0], "NESTED PRICING LEAK")
+check("overview tolerates non-dict config", server.overview_public_config(None) == {})
+
+# 20. Overview endpoints reject malformed tokens and 404 unknown ones.
+r = client.get("/api/overview/short")
+check("GET /api/overview/<malformed> -> 400", r.status_code == 400, f"got {r.status_code}")
+r = client.get("/api/overview/" + "a" * 32)
+check("GET /api/overview/<unknown> -> 404", r.status_code == 404, f"got {r.status_code}")
+r = client.get("/api/overview/" + "a" * 32 + "/pdf")
+check("GET /api/overview/<unknown>/pdf -> 404", r.status_code == 404, f"got {r.status_code}")
+r = client.get("/overview/" + "a" * 32)
+check("GET /overview/<token> serves the SPA", r.status_code == 200, f"got {r.status_code}")
+r = client.get("/api/proposal/abcdef123456/share-token")
+check("share-token for unknown pid -> 404", r.status_code == 404, f"got {r.status_code}")
+
+# 21. The overview page ships in the bundle and stays read-only.
+_r = client.get("/")
+check("SPA carries the overview view", b"OverviewView" in _r.data)
+check("overview page has a contact CTA", b"Questions about this project?" in _r.data)
+check("builders expose the no-pricing link", b"Overview link" in _r.data)
+
 # 14. Events endpoint: malformed id rejected, well-formed unknown returns []
 r = client.get("/api/proposal/NOT-A-VALID-ID/events")
 check("GET /api/proposal/<bad>/events -> 400", r.status_code == 400, f"got {r.status_code}")
