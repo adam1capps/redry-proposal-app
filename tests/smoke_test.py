@@ -254,6 +254,118 @@ check("Roof MRI applies no sales tax",
       server.mri_totals({"scanAddresses": [{"sf": "58000"}], "taxRate": "0.0625"})["subtotal"] == 4000.0,
       "scan fees are a service -- owner confirmed no tax")
 
+# 19. Overview share link: the redaction is the security boundary. Every
+#     assertion below is a leak that would reach a third party if it broke.
+_leaky = {
+    "leaseType": "performance", "projectName": "Crockett", "clientCompany": "Tebben",
+    "projectAddress": "5601 Menchaca Rd", "projectCity": "Austin", "wetSF": "11600",
+    # None of the following may ever cross the overview boundary:
+    "ratePSF": "2.00", "scanCost": "4500", "taxRate": "0.0625", "ventRate": "1000",
+    "installFee": "500", "showOption1": True, "customOptionLabel": "Net 30",
+    "customOptionAdj": "-3", "customOptionPayments": [{"pct": "100"}],
+    "clientContact": "Justin Boren", "clientTitle": "Estimator",
+    "clientPhone": "512-555-0100", "clientEmail": "gc@example.com",
+    "_proposalId": "abcdef123456", "_ventMapFilename": "x.png", "hidePricing": False,
+}
+_pub = server.overview_public_config(_leaky)
+check("overview keeps projectName", _pub.get("projectName") == "Crockett")
+check("overview keeps wetSF (scope, not price)", _pub.get("wetSF") == "11600")
+check("overview keeps clientCompany", _pub.get("clientCompany") == "Tebben")
+for _k in ("ratePSF", "scanCost", "taxRate", "ventRate", "installFee", "showOption1",
+           "customOptionLabel", "customOptionAdj", "customOptionPayments"):
+    check(f"overview redacts pricing key '{_k}'", _k not in _pub, "PRICING LEAK")
+for _k in ("clientContact", "clientTitle", "clientPhone", "clientEmail"):
+    check(f"overview redacts contact PII '{_k}'", _k not in _pub, "PII LEAK")
+check("overview redacts _proposalId",
+      "_proposalId" not in _pub,
+      "would let a building owner walk to the priced /proposal/<id> page")
+check("overview reports hasVentMap", _pub.get("hasVentMap") is True)
+
+# Roof MRI: per-address prices live INSIDE a list, which a top-level
+# whitelist cannot see. This is the easiest leak to reintroduce.
+_mri_leaky = {"leaseType": "roofmri", "projectName": "Portfolio", "scanAddresses": [
+    {"address": "A", "city": "Austin", "state": "TX", "zip": "78745",
+     "sf": "58000", "price": "9500"}]}
+_mpub = server.overview_public_config(_mri_leaky)
+check("overview keeps scan address + SF", _mpub["scanAddresses"][0]["sf"] == "58000")
+check("overview strips per-address price",
+      "price" not in _mpub["scanAddresses"][0], "NESTED PRICING LEAK")
+check("overview tolerates non-dict config", server.overview_public_config(None) == {})
+
+# 20. Overview endpoints reject malformed tokens and 404 unknown ones.
+r = client.get("/api/overview/short")
+check("GET /api/overview/<malformed> -> 400", r.status_code == 400, f"got {r.status_code}")
+r = client.get("/api/overview/" + "a" * 32)
+check("GET /api/overview/<unknown> -> 404", r.status_code == 404, f"got {r.status_code}")
+r = client.get("/api/overview/" + "a" * 32 + "/pdf")
+check("GET /api/overview/<unknown>/pdf -> 404", r.status_code == 404, f"got {r.status_code}")
+r = client.get("/overview/" + "a" * 32)
+check("GET /overview/<token> serves the SPA", r.status_code == 200, f"got {r.status_code}")
+r = client.get("/api/proposal/abcdef123456/share-token")
+check("share-token for unknown pid -> 404", r.status_code == 404, f"got {r.status_code}")
+
+# 21. The overview page ships in the bundle and stays read-only.
+_r = client.get("/")
+check("SPA carries the overview view", b"OverviewView" in _r.data)
+check("overview page has a contact CTA", b"Questions about this project?" in _r.data)
+check("builders expose the no-pricing link", b"Overview link" in _r.data)
+
+# 22. Every link we hand a client must be https. Render terminates TLS at its
+#     edge and forwards plain HTTP, so an unguarded request.host_url reports
+#     http:// and the proposal link a client clicks gets an "insecure" browser
+#     interstitial and trips corporate mail filters. Regression-guard it.
+def _origin(**kw):
+    with server.app.test_request_context("/", **kw):
+        return server.public_base_url()
+
+check("render origin is https when the proxy header is present",
+      _origin(base_url="http://redry-proposal-app.onrender.com",
+              headers={"X-Forwarded-Proto": "https"}).startswith("https://"))
+check("render origin is https even without the proxy header",
+      _origin(base_url="http://redry-proposal-app.onrender.com").startswith("https://"),
+      "a public host must never yield an http:// link")
+check("custom domain is upgraded to https",
+      _origin(base_url="http://proposals.re-dry.com") == "https://proposals.re-dry.com")
+check("an https request stays https",
+      _origin(base_url="https://redry-proposal-app.onrender.com") == "https://redry-proposal-app.onrender.com")
+check("localhost keeps http so dev still works",
+      _origin(base_url="http://127.0.0.1:5000") == "http://127.0.0.1:5000")
+check("localhost by name keeps http",
+      _origin(base_url="http://localhost:8080") == "http://localhost:8080")
+check("no raw host_url survives outside the helper",
+      open(server.__file__, encoding="utf-8").read().count('request.host_url.rstrip("/")') == 1,
+      "a new call site would reintroduce http:// links")
+
+# 23. Baseline security headers on every response.
+_r = client.get("/")
+check("nosniff header present", _r.headers.get("X-Content-Type-Options") == "nosniff")
+check("frame options present", _r.headers.get("X-Frame-Options") == "SAMEORIGIN")
+check("referrer policy present", _r.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin")
+check("HSTS not sent over plain http (dev safety)",
+      _r.headers.get("Strict-Transport-Security") is None)
+_rs = client.get("/", base_url="https://redry-proposal-app.onrender.com")
+check("HSTS sent over https",
+      "max-age=31536000" in (_rs.headers.get("Strict-Transport-Security") or ""),
+      "HSTS is what stops an emailed http:// link from ever leaving the browser insecure")
+
+# 24. "Invoice sent separately": the client must still SIGN, but must not be
+#     forced to pick a payment option or a payment method.
+_inv = {"leaseType": "performance", "clientCompany": "Acme", "projectName": "P",
+        "wetSF": "1000", "ratePSF": "2", "invoiceSeparately": True}
+server._sanitize_incoming_config(_inv)
+check("invoiceSeparately survives the config whitelist", _inv.get("invoiceSeparately") is True,
+      "would be silently dropped and the toggle would do nothing")
+check("invoiceSeparately does not change the bid value",
+      server.proposal_value(_inv) == 2000.0, "pricing is unaffected; only collection changes")
+_r = client.get("/")
+check("builders expose the invoice-separately toggle", b"Invoice sent separately" in _r.data)
+check("signing gate accounts for invoiceSeparately",
+      b"!form.invoiceSeparately && selectedOption===null" in _r.data,
+      "the 'select an option to continue' block must not fire in this mode")
+check("signature is still required in this mode",
+      _r.data.count(b"!sigName||!sigDate||!termsOk") >= 3,
+      "every client view must still require name, date and terms")
+
 # 14. Events endpoint: malformed id rejected, well-formed unknown returns []
 r = client.get("/api/proposal/NOT-A-VALID-ID/events")
 check("GET /api/proposal/<bad>/events -> 400", r.status_code == 400, f"got {r.status_code}")

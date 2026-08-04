@@ -18,13 +18,20 @@ except ImportError:
     ZoneInfoNotFoundError = Exception
 from html import escape as html_escape
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__, static_folder="static")
+# Render terminates TLS at its edge and forwards plain HTTP to gunicorn, so
+# without this Flask reports wsgi.url_scheme='http' and every link we generate
+# comes out as http:// -- which browsers show a "Not secure" interstitial for
+# and corporate mail filters flag on the way in. Honor the proxy's headers.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "").split(",") if os.environ.get("CORS_ORIGINS") else []
 CORS(app, origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS else ["*"], supports_credentials=True)
 
 _PID_RE = re.compile(r'^[a-f0-9]{6,64}$')
+_TOKEN_RE = re.compile(r'^[a-f0-9]{32}$')
 def validate_pid(pid):
     if not _PID_RE.match(pid):
         return None
@@ -57,12 +64,56 @@ SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "adam@re-dry.com")
 NOTIFY_EMAILS = [e.strip() for e in os.environ.get("NOTIFY_EMAILS", "adam@re-dry.com,regina@re-dry.com").split(",") if e.strip()]
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "adam@re-dry.com")
+# Set this in production to pin every generated link to one canonical origin
+# (e.g. https://proposals.re-dry.com). Wins over anything inferred from the
+# request, so a custom domain or a proxy quirk can never emit an http:// link.
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+
+_LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+
+def public_base_url():
+    """Absolute origin for links handed to clients: proposal links, email
+    buttons, PDF footers, and Stripe return URLs.
+
+    Every one of those is read by someone else's browser or mail scanner, so
+    an http:// origin gets flagged as unsafe even though the host redirects.
+    PUBLIC_BASE_URL wins when set; otherwise take the request origin (ProxyFix
+    has already applied X-Forwarded-Proto) and upgrade a stray http:// to
+    https:// for any non-local host as a last line of defense. Local
+    development keeps http so it stays usable."""
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL
+    base = request.host_url.rstrip("/")
+    host = (request.host or "").split(":")[0].lower()
+    if base.startswith("http://") and host not in _LOCAL_HOSTS and not host.endswith(".local"):
+        base = "https://" + base[len("http://"):]
+    return base
 REPLY_TO_EMAIL = os.environ.get("REPLY_TO_EMAIL", "adam@re-dry.com")
 
 for name, val in [("STRIPE_SECRET_KEY", stripe.api_key), ("STRIPE_PUBLISHABLE_KEY", STRIPE_PK),
                    ("GOOGLE_MAPS_API_KEY", GOOGLE_MAPS_KEY), ("DATABASE_URL", DATABASE_URL),
                    ("SENDGRID_API_KEY", SENDGRID_API_KEY)]:
     if not val: print(f"WARNING: {name} not set.")
+
+@app.after_request
+def _security_headers(resp):
+    """Baseline hardening for a site that clients open from an emailed link.
+
+    HSTS is the one that matters for the "not secure" complaint: once a
+    browser has seen it, an http:// link to this host is upgraded internally
+    and never leaves as an insecure request. Only sent over https so a local
+    http dev server can't pin itself.
+
+    No CSP here on purpose -- the SPA is a single inline text/babel script
+    compiled in the browser, so any useful policy would need 'unsafe-inline'
+    plus 'unsafe-eval' and would buy nothing while risking a blank app.
+    """
+    if request.is_secure:
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return resp
 
 # ─── Auth Routes ───
 @app.route("/api/auth/login", methods=["POST"])
@@ -171,6 +222,14 @@ def init_db():
                 mime_type TEXT, image_bytes BYTEA, created_at TIMESTAMPTZ DEFAULT NOW())""")
             _exec_ignore_dup(cur, """CREATE INDEX IF NOT EXISTS proposal_images_pid
                 ON proposal_images(proposal_id, sort_order)""")
+            # Overview share link. A random 128-bit token, deliberately NOT
+            # derivable from the 12-hex proposal id, and deliberately stored
+            # in a column rather than the config JSONB: config round-trips to
+            # the browser and through _sanitize_incoming_config, so a token
+            # there would both leak to the GC and get stripped on save.
+            _exec_ignore_dup(cur, "ALTER TABLE proposals ADD COLUMN IF NOT EXISTS share_token TEXT")
+            _exec_ignore_dup(cur, """CREATE UNIQUE INDEX IF NOT EXISTS proposals_share_token_unique
+                ON proposals(share_token) WHERE share_token IS NOT NULL""")
             conn.close()
             _INIT_DB_OK = True
             _INIT_DB_LAST_ERROR = None
@@ -287,6 +346,45 @@ def db_update_status_if_earlier(pid, status, ts_field=None):
         conn.close()
         db_update_status(pid, status, ts_field)
     except Exception as e: print(f"DB error (update_status_if_earlier): {e}")
+
+def db_get_or_create_share_token(pid):
+    """Get-or-create this proposal's overview token. Race-safe: the UPDATE is
+    guarded on share_token IS NULL and we re-read afterwards, so two
+    concurrent callers converge on whichever token won. Returns None when
+    there is no database or the row is missing."""
+    if not DATABASE_URL: return None
+    try:
+        conn = get_db(); cur = conn.cursor()
+        _exec_ignore_dup(cur, "ALTER TABLE proposals ADD COLUMN IF NOT EXISTS share_token TEXT")
+        cur.execute("SELECT share_token FROM proposals WHERE id=%s", (pid,))
+        row = cur.fetchone()
+        if not row:
+            conn.close(); return None
+        if row[0]:
+            conn.close(); return row[0]
+        cur.execute("UPDATE proposals SET share_token=%s WHERE id=%s AND share_token IS NULL",
+                    (secrets.token_hex(16), pid))
+        cur.execute("SELECT share_token FROM proposals WHERE id=%s", (pid,))
+        token = cur.fetchone()[0]
+        conn.close()
+        return token
+    except Exception as e:
+        print(f"DB error (share_token): {e}")
+        return None
+
+def db_find_by_share_token(token):
+    """(pid, config) for a share token, or (None, None)."""
+    if not DATABASE_URL: return (None, None)
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("SELECT id, config FROM proposals WHERE share_token=%s", (token,))
+        row = cur.fetchone(); conn.close()
+        if not row: return (None, None)
+        cfg = row[1] if isinstance(row[1], dict) else json.loads(row[1] or "{}")
+        return (row[0], cfg)
+    except Exception as e:
+        print(f"DB error (find_by_share_token): {e}")
+        return (None, None)
 
 def db_log_event(pid, event_type, details=None):
     if not DATABASE_URL: return
@@ -773,7 +871,7 @@ ALLOWED_CONFIG_KEYS = frozenset({
     "proposalDate", "validDays", "taxRate",
     # performance-lease
     "wetSF", "ratePSF", "scanCost", "numScans", "scanInterval", "totalVents",
-    "waiveScans", "hideScans", "hidePricing",
+    "waiveScans", "hideScans", "hidePricing", "invoiceSeparately",
     "showOption0", "showOption1", "showOption2",
     "showCustomOption", "customOptionLabel", "customOptionAdj", "customOptionPayments",
     # fixed-lease
@@ -787,6 +885,45 @@ ALLOWED_CONFIG_KEYS = frozenset({
     # round-trip metadata
     "_proposalId",
 })
+
+# ─── Overview share link redaction ───
+# INCLUDE-list, not a strip-list: a pricing field added to the builder later is
+# redacted by default instead of leaking until someone remembers to blacklist
+# it. Everything absent here never leaves the server on the overview endpoint.
+#
+# Deliberately excluded and worth stating plainly:
+#   - every pricing field (ratePSF, scanCost, taxRate, ventRate, installFee,
+#     the option flags, customOption*, and per-address scan prices)
+#   - client contact PII (clientContact/Title/Phone/Email) -- the GC's people
+#     are not the building owner's business
+#   - _proposalId, which would let a building owner walk from the redacted
+#     overview straight to the priced /proposal/<id> page
+OVERVIEW_CONFIG_KEYS = frozenset({
+    "leaseType", "clientCompany",
+    "projectName", "projectAddress", "projectCity", "projectState", "projectZip",
+    "projectSection", "proposalDate", "validDays",
+    # scope, not price -- these already appear in the client-facing PDF
+    "wetSF", "numScans", "scanInterval", "totalVents", "hideScans",
+    "numVents", "leaseTerm",
+    # roof-mri scope (per-address prices are stripped below)
+    "scanAddresses", "roofAccess",
+})
+
+def overview_public_config(cfg):
+    """Redacted copy of a proposal config, safe to hand to a third party."""
+    if not isinstance(cfg, dict):
+        return {}
+    out = {k: v for k, v in cfg.items() if k in OVERVIEW_CONFIG_KEYS}
+    # scanAddresses rows carry their own `price`, and the top-level filter
+    # cannot see inside a list. Rebuild each row from scope fields only.
+    if isinstance(out.get("scanAddresses"), list):
+        out["scanAddresses"] = [
+            {k: r.get(k, "") for k in ("address", "city", "state", "zip", "sf")}
+            for r in out["scanAddresses"] if isinstance(r, dict)
+        ]
+    out["hasVentMap"] = bool(cfg.get("_ventMapFilename") or cfg.get("_overheadFiles"))
+    out["imageCount"] = len(cfg.get("_overheadFiles") or []) or (1 if cfg.get("_ventMapFilename") else 0)
+    return out
 
 def _sanitize_incoming_config(config):
     """Whitelist filter: drop any keys not in ALLOWED_CONFIG_KEYS.
@@ -825,7 +962,7 @@ def generate_pdf():
             filename = secure_filename(vent_map.filename)
             vent_map_path = os.path.join(UPLOAD_DIR, f"ventmap_{uuid.uuid4().hex[:8]}_{filename}")
             vent_map.save(vent_map_path)
-        config["_baseUrl"] = request.host_url.rstrip("/")
+        config["_baseUrl"] = public_base_url()
         lease_type = config.get("leaseType", "performance")
         if lease_type == "roofmri":
             _paths = []
@@ -929,7 +1066,7 @@ def generate_proposal_link():
             config["_overheadFiles"] = [f for (_i, _l, f, _m, _b) in extra_images]
         elif existing_overheads:
             config["_overheadFiles"] = existing_overheads
-        config["_baseUrl"] = request.host_url.rstrip("/")
+        config["_baseUrl"] = public_base_url()
         lease_type = config.get("leaseType", "performance")
         _logo = LOGO_PATH if os.path.exists(LOGO_PATH) else None
         _vmap = os.path.join(PROPOSALS_DIR, vent_map_filename) if vent_map_filename else None
@@ -975,7 +1112,10 @@ def generate_proposal_link():
                 traceback.print_exc()
                 return jsonify({"error": "Could not save proposal to database. Please try again.", "detail": str(e)}), 503
         db_log_event(proposal_id, "created")
-        return jsonify({"proposalId": proposal_id, "clientUrl": f"/proposal/{proposal_id}", "pdfUrl": f"/api/proposal/{proposal_id}/pdf"})
+        _token = db_get_or_create_share_token(proposal_id)
+        return jsonify({"proposalId": proposal_id, "clientUrl": f"/proposal/{proposal_id}",
+                        "pdfUrl": f"/api/proposal/{proposal_id}/pdf",
+                        "overviewUrl": f"/overview/{_token}" if _token else None})
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -994,7 +1134,7 @@ def send_proposal(pid):
     company = html_escape(cfg.get("clientCompany", "Client"))
     contact = html_escape(cfg.get("clientContact", ""))
     section = html_escape(cfg.get("projectSection", ""))
-    base_url = request.host_url.rstrip("/")
+    base_url = public_base_url()
     proposal_url = f"{base_url}/proposal/{pid}"
     # Generate client-facing PDF (no pricing) and save it
     cfg["_baseUrl"] = base_url
@@ -1212,7 +1352,7 @@ def send_for_approval(pid):
     section = html_escape(cfg.get("projectSection", ""))
     contact = html_escape(cfg.get("clientContact", ""))
     client_email = cfg.get("clientEmail", "")
-    base_url = request.host_url.rstrip("/")
+    base_url = public_base_url()
     proposal_url = f"{base_url}/proposal/{pid}"
 
     # Calculate pricing for summary
@@ -1333,6 +1473,58 @@ def get_client_pdf(pid):
     if not pdf_bytes: return jsonify({"error": "Not found"}), 404
     return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf")
 
+# ─── Overview share link (public, no pricing) ───
+@app.route("/api/overview/<token>")
+def get_overview(token):
+    """Redacted proposal for a third party the GC forwards the link to.
+    Public by design. Logs its own event type so overview traffic never
+    inflates client 'viewed' counts, and never advances proposal status."""
+    if not _TOKEN_RE.match(token or ""):
+        return jsonify({"error": "Invalid link"}), 400
+    pid, cfg = db_find_by_share_token(token)
+    if not cfg:
+        return jsonify({"error": "Not found"}), 404
+    db_log_event(pid, "overview_viewed", {
+        "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
+        "ua": request.headers.get("User-Agent", "")[:200]})
+    return jsonify(overview_public_config(cfg))
+
+@app.route("/api/overview/<token>/ventmap")
+@app.route("/api/overview/<token>/ventmap/<int:idx>")
+def get_overview_image(token, idx=0):
+    if not _TOKEN_RE.match(token or ""):
+        return jsonify({"error": "Invalid link"}), 400
+    pid, cfg = db_find_by_share_token(token)
+    if not cfg:
+        return jsonify({"error": "Not found"}), 404
+    paths = _ensure_image_files(pid, cfg)
+    if idx < 0 or idx >= len(paths):
+        return jsonify({"error": "No image"}), 404
+    return send_file(paths[idx])
+
+@app.route("/api/overview/<token>/pdf")
+def get_overview_pdf(token):
+    """The client-facing PDF, which carries no pricing by construction."""
+    if not _TOKEN_RE.match(token or ""):
+        return jsonify({"error": "Invalid link"}), 400
+    pid, cfg = db_find_by_share_token(token)
+    if not cfg:
+        return jsonify({"error": "Not found"}), 404
+    pdf_bytes = get_or_regenerate_pdf(pid, client_facing=True)
+    if not pdf_bytes:
+        return jsonify({"error": "Not found"}), 404
+    return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf")
+
+@app.route("/api/proposal/<pid>/share-token")
+@require_auth
+def get_share_token(pid):
+    """Mint-or-fetch the overview link for the builder UI."""
+    if not validate_pid(pid): return jsonify({"error": "Invalid ID"}), 400
+    if not load_proposal_config(pid): return jsonify({"error": "Not found"}), 404
+    token = db_get_or_create_share_token(pid)
+    return jsonify({"shareToken": token,
+                    "overviewUrl": f"/overview/{token}" if token else None})
+
 @app.route("/api/proposal/<pid>/ventmap/<int:idx>")
 def get_proposal_image(pid, idx):
     """Nth overhead image for a multi-address Roof MRI proposal. Index 0 also
@@ -1395,9 +1587,18 @@ def accept_proposal(pid):
     contact = html_escape(cfg.get("clientContact", "")); client_email = cfg.get("clientEmail", "")
     section = html_escape(cfg.get("projectSection", "")); signer = html_escape(acc.get("name", "Unknown"))
     option_num = acc.get("selectedOption", "?"); option_label = OPTION_LABELS.get(option_num, f"Option {option_num}")
-    base_url = request.host_url.rstrip("/")
+    base_url = public_base_url()
+    # When the operator elected "Invoice sent separately", the client was
+    # never asked for a payment method, so don't report one either way.
+    invoice_separately = bool(cfg.get("invoiceSeparately"))
     pay_label = {"card": "Credit Card", "ach": "ACH / Bank Transfer"}.get(pay_method, "Not specified")
+    if invoice_separately or not pay_method:
+        pay_label = "Invoice sent separately"
     option_label_clean = str(option_label).rstrip(". ")
+    # No option chosen (operator elected invoice-separately, or a complimentary
+    # proposal) -- don't render "Option None" into the client's email.
+    if option_num in (None, "?", "") or not OPTION_LABELS.get(option_num):
+        option_label_clean = ""
     warranty_url = f"{base_url}/warranty"
     admin_html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
@@ -1410,13 +1611,13 @@ def accept_proposal(pid):
           <tr><td style="font-weight:700;padding-right:16px">Signed By:</td><td>{signer}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Date Signed:</td><td>{html_escape(acc.get('date',''))}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Payment Option:</td><td>{option_label}</td></tr>
-          <tr><td style="font-weight:700;padding-right:16px">Preferred Payment:</td><td><strong>{pay_label}</strong> &mdash; invoice separately</td></tr>
+          <tr><td style="font-weight:700;padding-right:16px">Billing:</td><td><strong>{pay_label}</strong></td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Warranty Agreed:</td><td>{'Yes' if sig_proof['warrantyAccepted'] else 'Not recorded'}{f" (rev. {html_escape(str(sig_proof['warrantyVersion']))})" if sig_proof['warrantyVersion'] else ''}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">Signed At (UTC):</td><td>{now.strftime('%B %d, %Y at %I:%M %p UTC')}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">IP Address:</td><td style="font-size:12px;color:#64748b">{html_escape(sig_proof['ipAddress'])}</td></tr>
           <tr><td style="font-weight:700;padding-right:16px">User Agent:</td><td style="font-size:11px;color:#94a3b8">{html_escape(sig_proof['userAgent'][:120])}</td></tr>
         </table>
-        <div style="margin-top:20px;padding:12px;background:#fef7ed;border:1px solid #E8943A;border-radius:6px;font-size:13px;color:#7c2d12"><strong>Action required:</strong> send the invoice for this signed agreement. The client selected <strong>{pay_label}</strong> and has been told to expect an invoice separately.</div>
+        <div style="margin-top:20px;padding:12px;background:#fef7ed;border:1px solid #E8943A;border-radius:6px;font-size:13px;color:#7c2d12"><strong>Action required:</strong> send the invoice for this signed agreement. Billing: <strong>{pay_label}</strong>. The client has been told to expect an invoice separately.</div>
         <div style="margin-top:12px;padding:12px;background:#f8fafc;border-radius:6px;font-size:13px;color:#64748b">The signed proposal PDF is attached. This email serves as confirmation that the above individual electronically accepted this proposal and the <a href="{warranty_url}" style="color:#E8943A">Limited Material Warranty Agreement</a>.</div>
         <div style="margin-top:16px;text-align:center"><a href="{base_url}/proposal/{pid}" style="display:inline-block;background:#E8943A;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:700">View Proposal</a></div>
       </div>
@@ -1435,10 +1636,13 @@ def accept_proposal(pid):
             billing_block = """
             <p style="font-size:14px;line-height:1.7;color:#374151">This vent system is provided at no charge as a complimentary service &mdash; there is nothing to pay.</p>"""
         else:
+            pay_method_line = ("" if invoice_separately or not pay_method else
+                f'<p style="font-size:14px;line-height:1.7;color:#374151;margin:0">Preferred payment method on file: '
+                f'<strong>{pay_label}</strong>. If that changes, just reply to this email.</p>')
             billing_block = f"""
             <div style="margin-top:16px;padding:14px 16px;background:#f8fafc;border-left:3px solid #E8943A;border-radius:4px">
-              <p style="font-size:14px;line-height:1.7;color:#374151;margin:0 0 6px"><strong>What happens next:</strong> no payment was collected today. We will send an invoice separately for <strong>{option_label_clean}</strong>.</p>
-              <p style="font-size:14px;line-height:1.7;color:#374151;margin:0">Preferred payment method on file: <strong>{pay_label}</strong>. If that changes, just reply to this email.</p>
+              <p style="font-size:14px;line-height:1.7;color:#374151;margin:0 0 6px"><strong>What happens next:</strong> no payment was collected today. We will send an invoice separately{f" for <strong>{option_label_clean}</strong>" if option_label_clean else ""}.</p>
+              {pay_method_line}
             </div>"""
         client_html = f"""
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1B2A4A">
@@ -1474,7 +1678,7 @@ def create_checkout_session():
         payment_method = data.get("paymentMethod", "card")
         client_company = data.get("clientCompany", ""); project_name = data.get("projectName", "")
         pmt_types = ["us_bank_account"] if payment_method == "ach" else ["card"]
-        base_url = request.host_url.rstrip("/")
+        base_url = public_base_url()
         params = {
             "payment_method_types": pmt_types,
             "line_items": [{"price_data": {"currency": "usd", "product_data": {"name": description, "description": f"{project_name} | {client_company}"}, "unit_amount": amount_cents}, "quantity": 1}],

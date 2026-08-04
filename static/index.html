@@ -204,7 +204,7 @@ const defaultForm = {
   projectName:"", projectAddress:"", projectCity:"", projectState:"", projectZip:"",
   projectSection:"", wetSF:"", ratePSF:"2.00", scanCost:"4500", numScans:"4",
   scanInterval:"3", totalVents:"", proposalDate: new Date().toISOString().split("T")[0], validDays:"30",
-  taxRate:"", waiveScans: false, hideScans: false, hidePricing: false,
+  taxRate:"", waiveScans: false, hideScans: false, hidePricing: false, invoiceSeparately: false,
   showOption0: false, showOption1: true, showOption2: false,
   showCustomOption: false,
   customOptionLabel: "",
@@ -261,7 +261,7 @@ const defaultFixedForm = {
   projectSection:"", numVents:"", ventRate:"1000", leaseTerm:"12", installFee:"0",
   shipAddress:"", shipCity:"", shipState:"", shipZip:"",
   proposalDate: new Date().toISOString().split("T")[0], validDays:"30",
-  taxRate:""
+  taxRate:"", invoiceSeparately: false
 };
 // ─── Roof MRI Scan defaults & content ───
 // Every process claim below is sourced from ReDry field-training recordings.
@@ -636,6 +636,11 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
               style={{width:18,height:18,accentColor:C.orange,cursor:"pointer"}}/>
             Hide all pricing (complimentary)
           </label>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy}}>
+            <input type="checkbox" checked={!!form.invoiceSeparately} onChange={e=>setForm(f=>({...f,invoiceSeparately:e.target.checked}))}
+              style={{width:18,height:18,accentColor:C.orange,cursor:"pointer"}}/>
+            Invoice sent separately
+          </label>
         </div>
       </div>
 
@@ -766,6 +771,19 @@ function BuilderForm({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loadi
         <div style={{fontSize:12,color:C.gray,marginTop:6}}>Share this link with your client.
           <a href={result.clientUrl} target="_blank" rel="noopener" style={{color:C.orange,marginLeft:6,fontWeight:600}}>Preview &#8594;</a>
         </div>
+        {result.overviewUrl && <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.navy,marginBottom:4}}>Overview link &mdash; no pricing, safe to forward</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <input readOnly value={`${window.location.origin}${result.overviewUrl}`}
+              style={{flex:1,padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,fontFamily:"monospace",color:C.dark,background:"#fff"}}
+              onClick={e=>e.target.select()}/>
+            <button onClick={()=>navigator.clipboard.writeText(`${window.location.origin}${result.overviewUrl}`)}
+              style={{padding:"8px 16px",border:`1px solid ${C.border}`,borderRadius:6,background:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",color:C.navy,whiteSpace:"nowrap"}}>Copy</button>
+          </div>
+          <div style={{fontSize:12,color:C.gray,marginTop:6}}>Scope and approach only &mdash; your client can forward this without exposing your pricing.
+            <a href={result.overviewUrl} target="_blank" rel="noopener" style={{color:C.orange,marginLeft:6,fontWeight:600}}>Preview &#8594;</a>
+          </div>
+        </div>}
 
         {/* Send to Client via Email */}
         <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
@@ -964,6 +982,11 @@ function FixedLeaseBuilder({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink
           </div>
         </div>
       </div>
+      <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,fontWeight:600,color:C.navy,marginTop:8}}>
+        <input type="checkbox" checked={!!form.invoiceSeparately} onChange={e=>setForm(f=>({...f,invoiceSeparately:e.target.checked}))}
+          style={{width:18,height:18,accentColor:C.orange,cursor:"pointer"}}/>
+        Invoice sent separately
+      </label>
 
       {numVents>0 && <div style={{marginTop:20}}>
         <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Payment — Due in Full</div>
@@ -1020,6 +1043,19 @@ function FixedLeaseBuilder({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink
         <div style={{fontSize:12,color:C.gray,marginTop:6}}>Share this link with your client.
           <a href={result.clientUrl} target="_blank" rel="noopener" style={{color:C.orange,marginLeft:6,fontWeight:600}}>Preview &#8594;</a>
         </div>
+        {result.overviewUrl && <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.navy,marginBottom:4}}>Overview link &mdash; no pricing, safe to forward</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <input readOnly value={`${window.location.origin}${result.overviewUrl}`}
+              style={{flex:1,padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,fontFamily:"monospace",color:C.dark,background:"#fff"}}
+              onClick={e=>e.target.select()}/>
+            <button onClick={()=>navigator.clipboard.writeText(`${window.location.origin}${result.overviewUrl}`)}
+              style={{padding:"8px 16px",border:`1px solid ${C.border}`,borderRadius:6,background:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",color:C.navy,whiteSpace:"nowrap"}}>Copy</button>
+          </div>
+          <div style={{fontSize:12,color:C.gray,marginTop:6}}>Scope and approach only &mdash; your client can forward this without exposing your pricing.
+            <a href={result.overviewUrl} target="_blank" rel="noopener" style={{color:C.orange,marginLeft:6,fontWeight:600}}>Preview &#8594;</a>
+          </div>
+        </div>}
 
         <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
           {!result.emailSent ? (<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -1135,13 +1171,13 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
   // was collected elsewhere, never to start one.
 
   const doAccept = async()=>{
-    if(!sigName||!sigDate||!termsOk||(selectedOption===null && !form.hidePricing))return;
+    if(!sigName||!sigDate||!termsOk||(selectedOption===null && !form.hidePricing && !form.invoiceSeparately))return;
     setSubmitting(true);
     try{
       if(proposalId) {
         const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({name:sigName,date:sigDate,selectedOption:selectedOption!==null?selectedOption+1:null,
-            paymentMethod:form.hidePricing?null:payingWith, warrantyAccepted:termsOk, warrantyVersion:WARRANTY_VERSION})});
+            paymentMethod:(form.hidePricing||form.invoiceSeparately)?null:payingWith, warrantyAccepted:termsOk, warrantyVersion:WARRANTY_VERSION})});
         if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
         if(!r.ok){ alert("Failed to submit acceptance. Please try again."); setSubmitting(false); return; }
       }
@@ -1165,15 +1201,17 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           <div>Signed by: <strong style={{color:C.dark}}>{sigName}</strong></div>
           <div>Date: <strong style={{color:C.dark}}>{sigDate}</strong></div>
           {selectedOption!==null && <div>Selected: <strong style={{color:C.dark}}>{options[selectedOption]?.label || `Option ${selectedOption+1}`}</strong></div>}
-          {!form.hidePricing && <div>Preferred payment: <strong style={{color:C.dark}}>{payingWith==="ach"?"ACH / Bank Transfer":"Credit Card"}</strong></div>}
+          {!form.hidePricing && !form.invoiceSeparately && <div>Preferred payment: <strong style={{color:C.dark}}>{payingWith==="ach"?"ACH / Bank Transfer":"Credit Card"}</strong></div>}
           <div>Warranty: <strong style={{color:C.dark}}>Limited Material Warranty Agreement accepted</strong></div>
         </div>
         {!form.hidePricing && <div style={{marginTop:20,padding:"16px 18px",background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,textAlign:"left"}}>
           <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:6}}>What happens next</div>
           <p style={{fontSize:13,color:C.gray,lineHeight:1.7,margin:0}}>
-            No payment was collected today. <strong style={{color:C.dark}}>You will receive an invoice separately</strong> for
-            {" "}{(options[selectedOption]?.label || "the selected option").replace(/\.\s*$/,"")}, payable by {payingWith==="ach"?"ACH / bank transfer":"credit card"}.
-            The ReDry team will also reach out to coordinate scheduling.
+            No payment was collected today. <strong style={{color:C.dark}}>You will receive an invoice separately</strong>
+            {selectedOption!==null && !form.invoiceSeparately
+              ? ` for ${(options[selectedOption]?.label || "the selected option").replace(/\.\s*$/,"")}, payable by ${payingWith==="ach"?"ACH / bank transfer":"credit card"}.`
+              : "."}
+            {" "}The ReDry team will also reach out to coordinate scheduling.
           </p>
         </div>}
         <div style={{marginTop:16,fontSize:12,color:C.gray}}>
@@ -1265,7 +1303,9 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
           {visibleOptions.length>0 && visibleOptions[0].opt.achEligible && <div style={{display:"flex",flexWrap:"wrap",gap:4,color:C.green}}><span style={{fontWeight:700,minWidth:100}}>ACH Savings:</span> Save $100 when paying via bank transfer</div>}
         </div>}
 
-        {!form.hidePricing && visibleOptions.length > 1 && <P>Review the options below and select the one you’d like. Nothing is charged here — ReDry will invoice you separately for the option you choose.</P>}
+        {!form.hidePricing && visibleOptions.length > 1 && <P>{form.invoiceSeparately
+            ? "Review the options below. Nothing is charged here and selecting one is optional \u2014 ReDry will invoice you separately."
+            : "Review the options below and select the one you\u2019d like. Nothing is charged here \u2014 ReDry will invoice you separately for the option you choose."}</P>}
         {!form.hidePricing && visibleOptions.length === 1 && <P>Nothing is charged here — ReDry will invoice you separately.</P>}
 
         {!form.hidePricing && <div style={{display:"flex",gap:16,marginTop:16,flexWrap:"wrap"}}>
@@ -1325,13 +1365,15 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
       <div style={{background:"#fff",borderRadius:12,border:`2px solid ${C.orange}`,padding:"28px 32px"}}>
         <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>Sign and Accept</h2>
         <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
-        {!form.hidePricing && selectedOption===null && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:16}}>
+        {!form.hidePricing && !form.invoiceSeparately && selectedOption===null && <div style={{background:"#fef7ed",border:`1px solid ${C.orange}`,borderRadius:8,padding:16,marginBottom:16}}>
           <div style={{fontSize:14,fontWeight:600,color:C.orange}}>Please select a payment option above to continue.</div>
         </div>}
-        {(form.hidePricing || selectedOption!==null) && <>
+        {(form.hidePricing || form.invoiceSeparately || selectedOption!==null) && <>
           {form.hidePricing
             ? <P>By signing below, you accept this complimentary proposal and agree to the Terms and Conditions above, including the ReDry Limited Material Warranty Agreement incorporated by reference.</P>
-            : <P>By signing below, you accept this proposal under <strong>{options[selectedOption].label}</strong> and agree to the Terms and Conditions above, including the ReDry Limited Material Warranty Agreement incorporated by reference.</P>}
+            : selectedOption===null
+              ? <P>By signing below, you accept this proposal and agree to the Terms and Conditions above, including the ReDry Limited Material Warranty Agreement incorporated by reference. ReDry will invoice you separately.</P>
+              : <P>By signing below, you accept this proposal under <strong>{options[selectedOption].label}</strong> and agree to the Terms and Conditions above, including the ReDry Limited Material Warranty Agreement incorporated by reference.</P>}
           <div style={{display:"flex",gap:16,marginTop:20,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:200}}>
               <label style={{display:"block",fontSize:12,fontWeight:600,color:C.navy,marginBottom:4}}>Full Name / Title</label>
@@ -1346,7 +1388,7 @@ function ClientView({form, ventMapUrl, proposalId, onBack}) {
             <input type="checkbox" checked={termsOk} onChange={e=>setTermsOk(e.target.checked)} style={{marginTop:3,width:16,height:16,accentColor:C.orange,flexShrink:0,cursor:"pointer"}}/>
             <span>I have read and agree to the Terms and Conditions of this proposal and to the ReDry <a href="/warranty" target="_blank" rel="noopener" style={{color:C.orange,fontWeight:700}}>Limited Material Warranty Agreement</a>.</span>
           </label>
-          {!form.hidePricing && <div style={{marginTop:18,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+          {!form.hidePricing && !form.invoiceSeparately && <div style={{marginTop:18,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
             <div style={{fontSize:13,fontWeight:600,color:C.navy,marginBottom:2}}>Preferred payment method</div>
             <div style={{fontSize:12,color:C.gray,marginBottom:8}}>For invoicing only &mdash; nothing is charged when you sign.</div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -1428,7 +1470,7 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
       if(proposalId) {
         const r = await fetch(`${API}/api/proposal/${proposalId}/accept`,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({name:sigName,date:sigDate,selectedOption:1,
-            paymentMethod:payingWith, warrantyAccepted:termsOk, warrantyVersion:WARRANTY_VERSION})});
+            paymentMethod:form.invoiceSeparately?null:payingWith, warrantyAccepted:termsOk, warrantyVersion:WARRANTY_VERSION})});
         if(r.status===409){ alert("This proposal has already been accepted."); setSubmitting(false); return; }
         if(!r.ok){ alert("Failed to submit acceptance. Please try again."); setSubmitting(false); return; }
       }
@@ -1450,14 +1492,17 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
         <div style={{marginTop:24,padding:16,background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,color:C.gray,textAlign:"left"}}>
           <div>Signed by: <strong style={{color:C.dark}}>{sigName}</strong></div>
           <div>Date: <strong style={{color:C.dark}}>{sigDate}</strong></div>
-          <div>Preferred payment: <strong style={{color:C.dark}}>{payingWith==="ach"?"ACH / Bank Transfer":"Credit Card"}</strong></div>
+          {!form.invoiceSeparately && <div>Preferred payment: <strong style={{color:C.dark}}>{payingWith==="ach"?"ACH / Bank Transfer":"Credit Card"}</strong></div>}
           <div>Warranty: <strong style={{color:C.dark}}>Limited Material Warranty Agreement accepted</strong></div>
         </div>
         <div style={{marginTop:20,padding:"16px 18px",background:"#fff",borderRadius:8,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,textAlign:"left"}}>
           <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:6}}>What happens next</div>
           <p style={{fontSize:13,color:C.gray,lineHeight:1.7,margin:0}}>
-            No payment was collected today. <strong style={{color:C.dark}}>You will receive an invoice separately</strong> for {fmtC(payingWith==="ach"?opt.achTotal:opt.total)},
-            payable by {payingWith==="ach"?"ACH / bank transfer":"credit card"}. The ReDry team will also reach out to coordinate scheduling.
+            No payment was collected today. <strong style={{color:C.dark}}>You will receive an invoice separately</strong>
+            {form.invoiceSeparately
+              ? ` for ${fmtC(opt.total)}.`
+              : ` for ${fmtC(payingWith==="ach"?opt.achTotal:opt.total)}, payable by ${payingWith==="ach"?"ACH / bank transfer":"credit card"}.`}
+            {" "}The ReDry team will also reach out to coordinate scheduling.
           </p>
         </div>
         <div style={{marginTop:16,fontSize:12,color:C.gray}}>
@@ -1573,7 +1618,7 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
           <input type="checkbox" checked={termsOk} onChange={e=>setTermsOk(e.target.checked)} style={{marginTop:3,width:16,height:16,accentColor:C.orange,flexShrink:0,cursor:"pointer"}}/>
           <span>I have read and agree to the Terms and Conditions of this proposal and to the ReDry <a href="/warranty" target="_blank" rel="noopener" style={{color:C.orange,fontWeight:700}}>Limited Material Warranty Agreement</a>.</span>
         </label>
-        <div style={{marginTop:18,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+        {!form.invoiceSeparately && <div style={{marginTop:18,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
           <div style={{fontSize:13,fontWeight:600,color:C.navy,marginBottom:2}}>Preferred payment method</div>
           <div style={{fontSize:12,color:C.gray,marginBottom:8}}>For invoicing only &mdash; nothing is charged when you sign.</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -1582,7 +1627,7 @@ function FixedLeaseClientView({form, ventMapUrl, proposalId, onBack}) {
               ACH / Bank Transfer {opt.achEligible ? "(Save $100)" : ""}
             </button>
           </div>
-        </div>
+        </div>}
         <button onClick={doAccept} disabled={!sigName||!sigDate||!termsOk||submitting} style={{display:"block",width:"100%",marginTop:20,padding:"14px 0",border:"none",borderRadius:8,background:sigName&&sigDate&&termsOk&&!submitting?C.orange:"#cbd5e1",color:"#fff",fontSize:15,fontWeight:700,cursor:sigName&&sigDate&&termsOk&&!submitting?"pointer":"not-allowed"}}>
           {submitting?"Submitting...":"Sign and Accept Agreement"}
         </button>
@@ -1755,6 +1800,147 @@ function PipelinePanel({analytics}) {
   );
 }
 
+// ─── OVERVIEW (no-pricing share page) ───
+// What a GC forwards to their own client. Everything here comes from the
+// server already redacted -- no pricing field is ever sent to this endpoint,
+// so there is nothing to accidentally render. Read-only by construction:
+// no signature block, no acceptance, no link back to the priced proposal.
+const WHY_REDRY = [
+  ["No tear-off", "Wet insulation is dried in place. The membrane stays on the building and the roof keeps working while it dries."],
+  ["Solar-powered", "The vents run on sunlight. No power drops, no conduit, no metering, nothing added to the building's utility bill."],
+  ["Engineered placement", "Vent count and layout come from a moisture survey of the actual roof, not a rule of thumb."],
+  ["Measured, not assumed", "Progress is verified with scheduled moisture scans on a documented scale, so drying is proven rather than asserted."],
+  ["Equipment stays ours", "The vent heads remain ReDry property and are retrieved at the end of the term. You are leasing a result, not buying hardware."],
+  ["Keeps options open", "A dried assembly can then be coated, recovered, or left in service \u2014 decisions that wet insulation would have taken off the table."],
+];
+const HOW_IT_WORKS = [
+  ["Survey", "The roof is scanned to find and quantify trapped moisture, and the wet area is mapped."],
+  ["Design", "Vent count and placement are engineered from that map and issued as a controlled placement drawing."],
+  ["Install", "The roofing contractor installs the 2-Way Vents to the ReDry specification. ReDry then fits the vent heads and confirms placement."],
+  ["Dry", "The system moves moisture out of the assembly continuously, powered by the sun."],
+  ["Verify", "Scheduled scans track progress against the starting map until the target is met."],
+  ["Retrieve", "At the end of the term ReDry removes its equipment and caps the penetrations."],
+];
+
+function OverviewView({cfg, token}) {
+  const isMri = cfg.leaseType === "roofmri";
+  const addr = [cfg.projectAddress, [cfg.projectCity, cfg.projectState].filter(Boolean).join(", "), cfg.projectZip].filter(Boolean).join(", ");
+  const rows = cfg.scanAddresses || [];
+  const totalSF = rows.reduce((a,r)=>a+(parseFloat(r.sf)||0), 0);
+  const imgs = Array.from({length: cfg.imageCount || 0}, (_,i)=>`${API}/api/overview/${token}/ventmap/${i}`);
+  const SH=(n,t)=>(<div style={{marginTop:34,marginBottom:12}}><h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>{n}. {t}</h2><div style={{height:2,width:50,background:C.orange,marginTop:6}}/></div>);
+  const P=({children})=>(<p style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"8px 0",textAlign:"justify"}}>{children}</p>);
+
+  return (<div style={{minHeight:"100vh",background:C.bg}}>
+    <div style={{background:C.navy,padding:"10px 0"}}>
+      <div style={{maxWidth:820,margin:"0 auto",padding:"0 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{color:"#fff",fontSize:13,fontWeight:600,letterSpacing:1}}>RE<span style={{color:C.orange}}>DRY</span></span>
+        <a href={`${API}/api/overview/${token}/pdf`} target="_blank" rel="noopener" style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",padding:"5px 14px",borderRadius:4,fontSize:12,textDecoration:"none"}}>PDF</a>
+      </div>
+    </div>
+    <div style={{maxWidth:820,margin:"0 auto",padding:"32px 20px 60px"}}>
+
+      <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden",marginBottom:24}}>
+        <div style={{height:4,background:C.orange}}/>
+        <div style={{padding:"28px 32px"}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.orange,letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>Project Overview</div>
+          <h1 style={{fontSize:26,fontWeight:800,color:C.navy,margin:0,fontFamily:"'Playfair Display',serif"}}>{cfg.projectName||"Project"}</h1>
+          {addr && <div style={{fontSize:13,color:C.gray,marginTop:6}}>{addr}</div>}
+          {cfg.projectSection && <div style={{fontSize:13,color:C.gray,marginTop:2}}>{cfg.projectSection}</div>}
+          {cfg.clientCompany && <div style={{fontSize:13,color:C.gray,marginTop:10}}>Prepared for <strong style={{color:C.navy}}>{cfg.clientCompany}</strong></div>}
+        </div>
+      </div>
+
+      <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
+        {isMri ? (<>
+          {SH(1,"What a Roof MRI Scan Is")}
+          <P>A Roof MRI moisture scan quantifies how much water is trapped in the roof assembly, where it is, and how wet it is &mdash; before anyone spends money on the roof. ReDry is physically on the roof for this work. Scanning is <strong>non-destructive</strong>: the membrane is not cut or cored. Subsurface moisture is then confirmed with <strong>minimally invasive</strong> pin-probe readings, each sealed with silicone sealant on completion.</P>
+          {SH(2,"The Process")}
+          {MRI_PROCESS.map(([head,body],i)=>(
+            <p key={head} style={{fontSize:14,lineHeight:1.7,color:"#374151",margin:"10px 0",textAlign:"justify"}}>
+              <strong style={{color:C.navy}}>{i+1}. {head}.</strong>&nbsp;&nbsp;{body}
+            </p>
+          ))}
+          {SH(3,"Scope")}
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginTop:8}}>
+              <thead><tr>
+                <th style={{background:C.navy,color:"#fff",padding:"8px 12px",textAlign:"left",fontWeight:600}}>Address</th>
+                <th style={{background:C.navy,color:"#fff",padding:"8px 12px",textAlign:"right",fontWeight:600}}>Roof Area</th>
+              </tr></thead>
+              <tbody>
+                {rows.map((r,i)=>(<tr key={i} style={{background:i%2===0?"#f8fafc":"#fff"}}>
+                  <td style={{padding:"8px 12px",color:"#374151"}}>{[r.address,r.city,r.state,r.zip].filter(Boolean).join(", ")||"—"}</td>
+                  <td style={{padding:"8px 12px",textAlign:"right",color:"#374151"}}>{r.sf?`${fmtN(parseFloat(r.sf)||0)} SF`:"—"}</td>
+                </tr>))}
+                {rows.length>1 && <tr style={{background:"#f1f5f9"}}>
+                  <td style={{padding:"10px 12px",fontWeight:800,color:C.navy,borderTop:`2px solid ${C.border}`}}>Total</td>
+                  <td style={{padding:"10px 12px",textAlign:"right",fontWeight:800,color:C.navy,borderTop:`2px solid ${C.border}`}}>{fmtN(totalSF)} SF</td>
+                </tr>}
+              </tbody>
+            </table>
+          </div>
+          <div style={{marginTop:14}}>
+            <a href={MRI_EXAMPLE_REPORT} target="_blank" rel="noopener" style={{padding:"9px 18px",border:`1px solid ${C.orange}`,borderRadius:6,color:C.orange,fontSize:13,fontWeight:700,textDecoration:"none",display:"inline-block"}}>See an example report &rarr;</a>
+          </div>
+        </>) : (<>
+          {SH(1,"The ReDry Solution")}
+          <P>ReDry, LLC manufactures and leases the ReDry 2-Way Vent System, a solar-powered drying system that removes trapped moisture from commercial roof insulation <strong>without removing the membrane</strong>. Wet insulation normally forces a tear-off &mdash; the most expensive and most disruptive option on the table. ReDry dries the assembly in place so the roof can stay in service.</P>
+          {cfg.wetSF && <P>This project covers approximately <strong>{fmtN(parseFloat(cfg.wetSF)||0)} square feet</strong> of identified wet insulation{cfg.projectSection?` in the ${cfg.projectSection}`:""}.</P>}
+          {cfg.numVents && <P>This project covers <strong>{cfg.numVents} ReDry 2-Way Vent{String(cfg.numVents)==="1"?"":"s"}</strong>{cfg.leaseTerm?` over a ${cfg.leaseTerm}-month term`:""}.</P>}
+
+          {SH(2,"Why ReDry")}
+          {WHY_REDRY.map(([h,b])=>(
+            <div key={h} style={{display:"flex",gap:12,marginBottom:10,alignItems:"flex-start"}}>
+              <span style={{color:C.green,fontWeight:800,flexShrink:0,fontSize:15}}>&#10003;</span>
+              <div><div style={{fontSize:14,fontWeight:700,color:C.navy}}>{h}</div>
+                   <div style={{fontSize:13,color:"#374151",lineHeight:1.65}}>{b}</div></div>
+            </div>
+          ))}
+
+          {SH(3,"How It Works")}
+          {HOW_IT_WORKS.map(([h,b],i)=>(
+            <div key={h} style={{display:"flex",gap:12,marginBottom:10,alignItems:"flex-start"}}>
+              <span style={{flexShrink:0,width:24,height:24,borderRadius:"50%",background:C.orange,color:"#fff",fontSize:12,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{i+1}</span>
+              <div><div style={{fontSize:14,fontWeight:700,color:C.navy}}>{h}</div>
+                   <div style={{fontSize:13,color:"#374151",lineHeight:1.65}}>{b}</div></div>
+            </div>
+          ))}
+
+          {!cfg.hideScans && <>
+            {SH(4,"Performance Criteria")}
+            <P>Drying progress is measured on the Roof MRI PHD (Physical Hydrology Detection) scale, which classifies readings as dry, damp, or saturated. Verification scans are taken on a schedule and compared against the survey taken before the system was installed.</P>
+            <PHDTable/>
+          </>}
+        </>)}
+      </div>
+
+      {imgs.length>0 && <div style={{background:"#fff",borderRadius:12,border:`1px solid ${C.border}`,padding:"28px 32px",marginBottom:24}}>
+        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 4px",fontFamily:"'Playfair Display',serif"}}>{isMri?"Roof Overheads":"Vent Placement Map"}</h2>
+        <div style={{height:2,width:50,background:C.orange,marginBottom:16}}/>
+        {imgs.map((u,i)=>(<img key={i} src={u} alt={`Exhibit ${i+1}`} style={{width:"100%",borderRadius:8,border:`1px solid ${C.border}`,marginBottom:14}}/>))}
+      </div>}
+
+      <div style={{background:"#fff",borderRadius:12,border:`2px solid ${C.orange}`,padding:"28px 32px",textAlign:"center"}}>
+        <h2 style={{fontSize:17,fontWeight:800,color:C.navy,margin:"0 0 6px",fontFamily:"'Playfair Display',serif"}}>Questions about this project?</h2>
+        <p style={{fontSize:13,color:C.gray,lineHeight:1.7,margin:"0 0 16px"}}>
+          This overview covers scope and approach only. For pricing and contract terms, talk to the contractor who sent it to you &mdash; or reach us directly and we&rsquo;ll point you the right way.
+        </p>
+        <div style={{fontSize:14,color:"#374151",lineHeight:1.9}}>
+          <div><strong style={{color:C.navy}}>ReDry, LLC</strong></div>
+          <div>Adam Capps, Founder</div>
+          <div>865.771.3848</div>
+        </div>
+        <a href="mailto:adam@re-dry.com" style={{display:"inline-block",marginTop:16,padding:"11px 26px",background:C.orange,color:"#fff",borderRadius:8,fontSize:14,fontWeight:700,textDecoration:"none"}}>Email ReDry</a>
+      </div>
+
+      <div style={{textAlign:"center",color:C.gray,fontSize:11,marginTop:20}}>
+        ReDry, LLC &nbsp;&bull;&nbsp; Advancing the Science of Moisture Removal
+      </div>
+    </div>
+  </div>);
+}
+
 // ─── ROOF MRI BUILDER ───
 function RoofMRIBuilder({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,loading,result,onSetResult,onSearch,onDashboard,onBack}) {
   const resultRef = useRef();
@@ -1906,6 +2092,19 @@ function RoofMRIBuilder({form,setForm,ventMapFile,setVentMapFile,onPDF,onLink,lo
       <div style={{fontSize:12,color:C.gray,marginTop:6}}>Share this link with your client.
         <a href={result.clientUrl} target="_blank" rel="noopener" style={{color:C.orange,marginLeft:6,fontWeight:600}}>Preview &#8594;</a>
       </div>
+      {result.overviewUrl && <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.navy,marginBottom:4}}>Overview link &mdash; no pricing, safe to forward</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <input readOnly value={`${window.location.origin}${result.overviewUrl}`}
+            style={{flex:1,padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,fontSize:13,fontFamily:"monospace",color:C.dark,background:"#fff"}}
+            onClick={e=>e.target.select()}/>
+          <button onClick={()=>navigator.clipboard.writeText(`${window.location.origin}${result.overviewUrl}`)}
+            style={{padding:"8px 16px",border:`1px solid ${C.border}`,borderRadius:6,background:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",color:C.navy,whiteSpace:"nowrap"}}>Copy</button>
+        </div>
+        <div style={{fontSize:12,color:C.gray,marginTop:6}}>Scope and approach only &mdash; your client can forward this without exposing your pricing.
+          <a href={result.overviewUrl} target="_blank" rel="noopener" style={{color:C.orange,marginLeft:6,fontWeight:600}}>Preview &#8594;</a>
+        </div>
+      </div>}
       <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #bbf7d0"}}>
         {!result.emailSent ? (<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <input value={result.sendEmail||form.clientEmail||""} onChange={e=>onSetResult(r=>({...r,sendEmail:e.target.value}))}
@@ -2431,6 +2630,7 @@ function App() {
   const [ventMapFile,setVentMapFile] = useState(null);
   const [ventMapUrl,setVentMapUrl] = useState(null);
   const [mriImageUrls,setMriImageUrls] = useState([]);
+  const [overview,setOverview] = useState(null);
   const [loading,setLoading] = useState(null);
   const [result,setResult] = useState(null);
   const [proposalId,setProposalId] = useState(null);
@@ -2447,6 +2647,22 @@ function App() {
     // Standalone warranty page. Public and static — no proposal data, no
     // auth, no view logging. Linked from proposal terms and signing emails.
     if(/^\/warranty\/?$/.test(path)) { setView("warranty"); return; }
+    // No-pricing overview a GC can forward to their client. Public, token-
+    // keyed, and deliberately unable to reach the priced /proposal/<id> page.
+    const om = path.match(/^\/overview\/([a-f0-9]{32})$/);
+    if(om) {
+      const tok = om[1];
+      fetch(`${API}/api/overview/${tok}`).then(r=>{
+        if(!r.ok) throw new Error("not found");
+        return r.json();
+      }).then(cfg=>{
+        if(cfg && cfg.error) throw new Error(cfg.error);
+        setOverview({cfg, token:tok});
+        setAuthed(true);
+        setView("overview");
+      }).catch(()=>setView("not-found"));
+      return;
+    }
     const match = path.match(/^\/proposal\/([a-f0-9]+)$/);
     if(match) {
       const id = match[1];
@@ -2557,6 +2773,7 @@ function App() {
 
   if(view==="loading") return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.gray}}>Loading...</div>;
   if(view==="warranty") return <WarrantyView/>;
+  if(view==="overview") return <OverviewView cfg={overview?overview.cfg:{}} token={overview?overview.token:""}/>;
   if(view==="not-found") return (<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg}}>
     <div style={{textAlign:"center",padding:40}}>
       <div style={{width:72,height:72,borderRadius:"50%",background:"#fef2f2",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",fontSize:32,color:"#dc2626"}}>!</div>
@@ -2600,6 +2817,12 @@ function App() {
       // just loaded — otherwise it keeps showing whatever link was created
       // most recently (which would point at a different proposal entirely).
       setResult({type:"link", proposalId:pid, clientUrl:`/proposal/${pid}`, pdfUrl:`/api/proposal/${pid}/pdf`});
+      // Overview links are minted server-side, so an existing proposal has to
+      // ask for its token rather than assume one. Silent on failure -- the
+      // share panel simply omits the row.
+      authFetch(`${API}/api/proposal/${pid}/share-token`).then(r=>r.json()).then(t=>{
+        if(t && t.overviewUrl) setResult(r=>({...r, overviewUrl:t.overviewUrl}));
+      }).catch(()=>{});
       if(ventFile) setVentMapUrl(`${API}/api/proposal/${pid}/ventmap`);
       else { setVentMapUrl(null); setVentMapFile(null); }
       setView("form");
