@@ -2,7 +2,10 @@ services:
   - type: web
     name: redry-proposal-builder
     runtime: docker
-    plan: free
+    # Instance type is deliberately NOT declared here. It is managed in the
+    # Render dashboard; asserting it from the blueprint risks a sync pulling a
+    # paid service back to free, which would silently drop custom domains --
+    # Render does not offer those on free instances.
     healthCheckPath: /health
     envVars:
       - key: PORT
